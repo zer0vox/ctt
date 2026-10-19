@@ -1,0 +1,28 @@
+{
+  "name": "token-pup",
+  "productName": "Token Pup",
+  "version": "0.1.0",
+  "description": "A pixel-art desktop dog whose joy tracks your remaining Claude usage.",
+  "main": "./out/main/index.js",
+  "author": "Sumip Chaudhary",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev --watch",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "sprites": "node scripts/preview.ts",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}

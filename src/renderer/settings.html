@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    />
+    <title>Token Pup Settings</title>
+    <link rel="stylesheet" href="./settings.css" />
+  </head>
+  <body>
+    <header>
+      <canvas id="face" aria-hidden="true"></canvas>
+      <div>
+        <h1>Token Pup</h1>
+        <p class="sub" id="headline">Loading…</p>
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <h2>Mood follows</h2>
+        <label class="field">
+          <span>Which reading drives the dog</span>
+          <select id="primary">
+            <option value="auto">Whichever has the least left (recommended)</option>
+            <option value="plan-5h">Claude plan: 5-hour limit</option>
+            <option value="plan-7d">Claude plan: weekly limit</option>
+            <option value="logs">Claude Code budget</option>
+            <option value="api">API credits</option>
+          </select>
+        </label>
+      </section>
+
+      <section>
+        <h2>Claude plan limits</h2>
+        <label class="check"><input type="checkbox" id="plan-enabled" /> Track my 5-hour and weekly limits</label>
+
+        <h3>Live updates <span class="tag">recommended</span></h3>
+        <label class="check"
+          ><input type="checkbox" id="plan-live" /> Check my usage with Anthropic every few minutes</label
+        >
+        <div class="status" id="live-status"></div>
+        <p class="hint small">
+          Uses the Claude login that Claude Code saved on this computer to make the same read-only request Claude
+          Code makes for <code>/usage</code>. Works with the VS Code panel, the terminal, JetBrains and the desktop
+          app, and includes claude.ai usage. Your login is only sent to api.anthropic.com and is never stored by
+          Token Pup. Unofficial: it could stop working if Anthropic changes it.
+        </p>
+
+        <h3>Without live updates</h3>
+        <p class="hint small">
+          Token Pup also reads the copy of your usage that Claude Code keeps, which refreshes only when Claude Code
+          checks usage (for example <code>/usage</code>). If you run <code>claude</code> in a terminal on a Pro or
+          Max plan, the status line bridge updates after every reply and shows
+          <code>🐶 5h 42% · 7d 18%</code>.
+        </p>
+        <div class="status" id="bridge-status"></div>
+        <div class="actions">
+          <button id="bridge-install" class="secondary">Install bridge</button>
+          <button id="bridge-remove" class="secondary">Remove bridge</button>
+        </div>
+        <p class="hint small">
+          Edits <code>~/.claude/settings.json</code> (a backup is saved next to it). An existing status line command
+          keeps working. Needs Node.js on your PATH.
+        </p>
+      </section>
+
+      <section>
+        <h2>Claude Code logs</h2>
+        <label class="check"
+          ><input type="checkbox" id="logs-enabled" /> Read token usage from local Claude Code logs</label
+        >
+        <p class="hint">Only token counts and timestamps are read, never your prompts. Costs are estimates at API list prices.</p>
+        <div class="grid3">
+          <label class="field">
+            <span>Budget</span>
+            <input type="number" id="logs-amount" min="0" step="any" placeholder="none" />
+          </label>
+          <label class="field">
+            <span>Unit</span>
+            <select id="logs-metric">
+              <option value="usd">USD (est.)</option>
+              <option value="tokens">tokens</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Per</span>
+            <select id="logs-period">
+              <option value="block">5-hour block</option>
+              <option value="day" selected>day</option>
+              <option value="week">week</option>
+              <option value="month">month</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Anthropic API credits</h2>
+        <label class="check"><input type="checkbox" id="api-enabled" /> Track API spend</label>
+        <p class="hint">
+          Needs an <strong>Admin API key</strong> (<code>sk-ant-admin…</code>) from the Claude Console. It is encrypted
+          with Windows DPAPI and only sent to api.anthropic.com.
+        </p>
+        <div class="status" id="key-status"></div>
+        <div class="actions">
+          <input type="password" id="api-key" placeholder="sk-ant-admin01-…" autocomplete="off" spellcheck="false" />
+          <button id="key-save">Save key</button>
+          <button id="key-clear" class="secondary">Remove</button>
+        </div>
+        <div class="grid3">
+          <label class="field">
+            <span>Monthly budget (USD)</span>
+            <input type="number" id="api-budget" min="0" step="any" placeholder="none" />
+          </label>
+          <label class="field">
+            <span>Or: credit balance</span>
+            <input type="number" id="api-balance" min="0" step="any" placeholder="none" />
+          </label>
+          <label class="field">
+            <span>Balance as of</span>
+            <input type="date" id="api-asof" />
+          </label>
+        </div>
+        <p class="hint small">
+          The API has no balance endpoint. Enter the balance from Console › Billing and the date you read it; Token
+          Pup subtracts spend since then. A balance takes priority over a monthly budget.
+        </p>
+      </section>
+
+      <section>
+        <h2>The pup</h2>
+        <label class="field narrow">
+          <span>Size</span>
+          <select id="scale">
+            <option value="2">Small</option>
+            <option value="3">Medium</option>
+            <option value="4">Large</option>
+            <option value="5">Huge</option>
+          </select>
+        </label>
+        <label class="check"
+          ><input type="checkbox" id="notifications" /> Notify me when the pup gets worried or runs out</label
+        >
+        <label class="check"
+          ><input type="checkbox" id="click-through" /> Click-through (clicks go to the windows underneath)</label
+        >
+        <label class="check"><input type="checkbox" id="start-on-login" /> Start on login</label>
+        <p class="hint small" id="login-hint"></p>
+      </section>
+
+      <section>
+        <h2>Preview moods</h2>
+        <label class="check"><input type="checkbox" id="preview-on" /> Preview with a fake reading</label>
+        <div class="slider">
+          <input type="range" id="preview-joy" min="0" max="100" value="70" disabled />
+          <output id="preview-out">70% left</output>
+        </div>
+      </section>
+
+      <p class="error" id="error" role="alert"></p>
+    </main>
+    <script type="module" src="./settings.ts"></script>
+  </body>
+</html>

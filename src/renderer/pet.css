@@ -1,0 +1,146 @@
+:root {
+  --ink: #fff8ee;
+  --panel: rgba(28, 20, 16, 0.82);
+  --edge: #3b2218;
+  --track: rgba(255, 255, 255, 0.14);
+  --good: #5ccf7a;
+  --ok: #f2c94c;
+  --low: #f2994a;
+  --bad: #eb5757;
+  --font: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font-family: var(--font);
+  color: var(--ink);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+#pet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#scene {
+  display: block;
+  image-rendering: pixelated;
+  cursor: grab;
+}
+
+#scene.dragging {
+  cursor: grabbing;
+}
+
+#hud {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin-top: 2px;
+  padding: 3px 6px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 11px;
+}
+
+#hud:empty {
+  display: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 26px 96px auto;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.row.primary .label {
+  color: #ffd54a;
+}
+
+.row.stale {
+  opacity: 0.6;
+}
+
+.bar {
+  height: 6px;
+  background: var(--track);
+  border: 1px solid #000;
+  position: relative;
+}
+
+.bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+}
+
+.info,
+.wake {
+  white-space: nowrap;
+}
+
+.wake {
+  color: #9ccbff;
+}
+
+.card {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(var(--scene-h, 160px) + var(--hud-h, 0px) + 6px);
+  /* Never taller than the space above the dog: overflow drops the last line, not the title. */
+  max-height: calc(100vh - var(--scene-h, 160px) - var(--hud-h, 0px) - 6px);
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 6px 8px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 13px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.card.show {
+  opacity: 1;
+  transform: none;
+}
+
+.card .title {
+  font-weight: 700;
+  color: #ffd54a;
+  margin-bottom: 2px;
+}
+
+/* Long lines (a reset time) wrap with a hanging indent rather than being cut off. */
+.card .line {
+  padding-left: 2ch;
+  text-indent: -2ch;
+  overflow-wrap: anywhere;
+}
+
+.card .muted {
+  opacity: 0.7;
+}

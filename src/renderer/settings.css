@@ -1,0 +1,214 @@
+:root {
+  --bg: #f4f1ec;
+  --card: #ffffff;
+  --ink: #2a1a13;
+  --muted: #6f5f55;
+  --line: #e3dcd2;
+  --accent: #c8423c;
+  --accent-ink: #ffffff;
+  --ok: #2e8b57;
+  --warn: #9a5c00;
+  --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Mono', Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d1714;
+    --card: #2a221d;
+    --ink: #f5ece2;
+    --muted: #b7a79a;
+    --line: #43372f;
+    --accent: #e0645a;
+    --ok: #6fd39a;
+    --warn: #f2b05a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 var(--font);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px 8px;
+}
+
+#face {
+  width: 64px;
+  height: 64px;
+  image-rendering: pixelated;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.sub {
+  margin: 2px 0 0;
+  color: var(--muted);
+}
+
+main {
+  padding: 8px 22px 28px;
+}
+
+section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+h3 {
+  margin: 14px 0 4px;
+  font-size: 13px;
+}
+
+.tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 6px 0;
+  color: var(--muted);
+}
+
+.small {
+  font-size: 12px;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field.narrow {
+  max-width: 180px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input[type='number'],
+input[type='date'],
+input[type='password'],
+select {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.actions input {
+  flex: 1;
+}
+
+button {
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status {
+  font-size: 13px;
+}
+
+.status.ok {
+  color: var(--ok);
+}
+
+.status.warn {
+  color: var(--warn);
+}
+
+.slider {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.slider input {
+  flex: 1;
+}
+
+.error {
+  color: var(--accent);
+  min-height: 1em;
+}
+
+@media (max-width: 480px) {
+  .grid3 {
+    grid-template-columns: 1fr;
+  }
+}
