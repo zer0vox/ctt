@@ -1,6 +1,6 @@
 import type { MoodId, UsageSnapshot } from './types.ts'
 
-/** Mood tiers by remaining fraction, highest first. */
+/** By remaining fraction, highest first. */
 export const MOOD_TIERS: ReadonlyArray<{ mood: MoodId; min: number }> = [
   { mood: 'ecstatic', min: 0.8 },
   { mood: 'happy', min: 0.6 },
@@ -28,10 +28,7 @@ function tierBounds(mood: MoodId): [number, number] | null {
   return [MOOD_TIERS[i].min, i === 0 ? Infinity : MOOD_TIERS[i - 1].min]
 }
 
-/**
- * Mood for a remaining fraction. Passing the previous mood adds hysteresis, so a reading
- * that hovers on a tier boundary doesn't make the dog flicker between two moods.
- */
+/** `prev` adds hysteresis so a reading on a tier boundary doesn't flicker. */
 export function moodFor(joy: number | null, prev?: MoodId | null): MoodId {
   if (joy === null || Number.isNaN(joy)) return 'sniffing'
   const j = Math.min(1, Math.max(0, joy))
@@ -42,19 +39,14 @@ export function moodFor(joy: number | null, prev?: MoodId | null): MoodId {
   return MOOD_TIERS.find((t) => j >= t.min)?.mood ?? 'exhausted'
 }
 
-/**
- * The snapshot that drives the mood: the chosen one if it has data, otherwise the one
- * with the least remaining. Info-only snapshots (no limit) never drive the mood.
- */
+/** The chosen snapshot if it has data, otherwise the one with the least remaining. */
 export function pickPrimary(snapshots: UsageSnapshot[], primary: string, now = Date.now()): UsageSnapshot | null {
   const limited = snapshots.filter((s) => s.usedFraction !== null)
   if (primary !== 'auto') {
     const chosen = limited.find((s) => s.id === primary)
     if (chosen) return chosen
   }
-  // Usage only climbs until a limit resets, so a stale reading whose reset is still ahead is a
-  // safe lower bound and keeps counting. A stale one that may have reset since (reset time
-  // passed or unknown) only counts when nothing better is left.
+  // Usage only climbs until reset, so a stale reading not yet reset is a safe lower bound.
   const trusted = limited.filter((s) => !s.stale || (s.resetsAt !== undefined && s.resetsAt > now))
   let worst: UsageSnapshot | null = null
   for (const s of trusted.length ? trusted : limited) if (!worst || s.usedFraction! > worst.usedFraction!) worst = s

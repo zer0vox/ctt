@@ -1,5 +1,4 @@
-// Installs the status line bridge into Claude Code's user settings, and removes it again.
-// Plain Node (no Electron imports) so it can be tested against temp files.
+// No Electron imports, so tests can run it against temp files.
 
 import { execFile } from 'node:child_process'
 import { copyFile, readFile } from 'node:fs/promises'
@@ -9,9 +8,7 @@ import type { BridgeStatus } from '../shared/types.ts'
 import { writeFileAtomic } from './fsAtomic.ts'
 
 export interface BridgePaths {
-  /** ~/.claude/settings.json */
   claudeSettings: string
-  /** Folder the bridge script, its config and plan-state.json live in. */
   dataDir: string
 }
 
@@ -26,14 +23,14 @@ interface StatusLine {
   [key: string]: unknown
 }
 
-/** bridge.json: the status line that was there before Token Pup, restored on uninstall. */
+/** `chain` is the status line from before Token Pup, restored on uninstall. */
 interface BridgeConfig {
   chain: StatusLine | null
 }
 
 function parseSettings(file: string, text: string): Record<string, unknown> {
   if (!text.trim()) return {}
-  // Refuse to touch a settings file we can't parse rather than overwrite it.
+  // Let a parse error throw rather than overwrite a broken settings file.
   const parsed = JSON.parse(text)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${file} is not a JSON object`)
   return parsed
@@ -84,10 +81,7 @@ export function bridgeStatus(paths: BridgePaths): BridgeStatus {
   }
 }
 
-/**
- * The version of `node` on PATH, or null. The bridge runs as `node statusline.mjs`, but Claude
- * Code's native installer doesn't need Node, so it may not be there.
- */
+/** Claude Code's native installer doesn't ship Node, so it may be missing. */
 export function nodeVersion(): Promise<string | null> {
   return new Promise((resolve) => {
     execFile('node', ['--version'], { timeout: 5000, windowsHide: true }, (err, out) =>
@@ -96,12 +90,7 @@ export function nodeVersion(): Promise<string | null> {
   })
 }
 
-/**
- * Copy the bridge script into the data folder and point Claude Code's statusLine at it.
- * The first install backs up settings.json and remembers the status line that was there (if
- * any) so uninstalling restores it; reinstalling keeps both, so they always describe the
- * settings from before Token Pup.
- */
+/** Reinstalls keep the first backup and chain, so both predate Token Pup. */
 export async function installBridge(paths: BridgePaths, scriptSource: string): Promise<void> {
   const settings = await readSettings(paths.claudeSettings)
   await writeFileAtomic(join(paths.dataDir, SCRIPT), scriptSource)
@@ -117,7 +106,6 @@ export async function installBridge(paths: BridgePaths, scriptSource: string): P
   await writeFileAtomic(paths.claudeSettings, JSON.stringify(settings, null, 2) + '\n')
 }
 
-/** Remove our statusLine and restore the one that was there before, if any. */
 export async function uninstallBridge(paths: BridgePaths): Promise<void> {
   const settings = await readSettings(paths.claudeSettings)
   if (!isOurs(settings.statusLine)) return

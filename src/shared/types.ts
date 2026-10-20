@@ -1,41 +1,31 @@
-// Types shared by the main process, preload and renderers.
-
-/** One usage reading from one provider, normalised so the mood engine can compare them. */
 export interface UsageSnapshot {
   /** 'plan-5h' | 'plan-7d' | 'logs' | 'api' */
   id: string
-  /** Short label for the HUD, e.g. "5h". */
   short: string
-  /** Long label for menus and tooltips, e.g. "5-hour limit". */
   label: string
-  /** 0..1 of the limit used, or null when there is no limit to compare against (info only). */
+  /** 0..1, null for info-only snapshots with no limit. */
   usedFraction: number | null
-  /** Epoch ms when the limit resets, when known. */
+  /** Epoch ms. */
   resetsAt?: number
-  /** True when the reading is old and may be out of date. */
   stale: boolean
-  /** Epoch ms of the underlying data. */
+  /** Epoch ms. */
   updatedAt: number
-  /** One-line summary, e.g. "42% used". */
   summary: string
-  /** Extra lines for the hover card. */
   details: string[]
 }
 
 export type MoodId = 'ecstatic' | 'happy' | 'content' | 'anxious' | 'sad' | 'exhausted' | 'sniffing'
 
-/** What the main process pushes to the pet window. */
 export interface PetState {
   snapshots: UsageSnapshot[]
-  /** Id of the snapshot driving the mood, 'debug' when previewing, or null. */
+  /** Snapshot driving the mood, or 'debug' while previewing. */
   primaryId: string | null
-  /** 0..1 remaining for the primary snapshot, or null when nothing has data. */
+  /** 0..1 remaining on the primary snapshot. */
   joy: number | null
-  /** Mood for `joy`, with hysteresis applied. */
   mood: MoodId
-  /** Reset time of the primary snapshot, if known. */
+  /** Epoch ms, from the primary snapshot. */
   resetsAt?: number
-  /** How many real limit resets main has seen; the pet celebrates when it goes up. */
+  /** Limit resets seen so far; the pet celebrates when it goes up. */
   celebrations: number
 }
 
@@ -50,19 +40,19 @@ export interface LogBudget {
 
 export interface ApiBalance {
   amountUsd: number
-  /** YYYY-MM-DD (UTC) the balance was read from the Console. */
+  /** YYYY-MM-DD, UTC. */
   asOf: string
 }
 
 export interface Settings {
-  /** 'auto' (lowest remaining) or a snapshot id. */
+  /** Snapshot id, or 'auto' for the least remaining. */
   primary: string
   scale: number
   clickThrough: boolean
   startOnLogin: boolean
   notifications: boolean
   position: { x: number; y: number } | null
-  /** `live`: poll Anthropic's usage endpoint with the Claude Code login (opt-in, unofficial). */
+  /** `live` polls the unofficial usage endpoint with the Claude Code login. */
   plan: { enabled: boolean; live: boolean }
   logs: { enabled: boolean; budget: LogBudget | null }
   api: { enabled: boolean; monthlyBudgetUsd: number | null; balance: ApiBalance | null }
@@ -76,12 +66,12 @@ export interface LiveStatus {
 
 export interface BridgeStatus {
   installed: boolean
-  /** A status line command that belongs to something else (it gets chained). */
+  /** Someone else's status line command, which gets chained. */
   otherCommand: string | null
   lastUpdate: number | null
 }
 
-/** Settings plus read-only status for the settings window. The API key itself never leaves main. */
+/** The API key itself never leaves main, only whether one is set. */
 export interface SettingsView {
   settings: Settings
   apiKeySet: boolean
@@ -97,11 +87,11 @@ export type SettingsPatch = Partial<Omit<Settings, 'plan' | 'logs' | 'api'>> & {
   api?: Partial<Settings['api']>
 }
 
-/** The API the preload script exposes on `window.pup`. */
+/** Exposed by preload as `window.pup`. */
 export interface PupApi {
   getState(): Promise<PetState>
   onState(cb: (state: PetState) => void): () => void
-  /** Fired when settings change from outside the settings window (e.g. the tray menu). */
+  /** Settings changed elsewhere, e.g. from the tray menu. */
   onSettingsChanged(cb: () => void): () => void
   getSettings(): Promise<SettingsView>
   saveSettings(patch: SettingsPatch): Promise<SettingsView>

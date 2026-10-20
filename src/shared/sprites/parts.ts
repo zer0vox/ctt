@@ -1,18 +1,12 @@
-// Hand-placed pixel grids for the German Shepherd. Symmetric parts are drawn as the left half
-// and mirrored. Coordinates are in the 48x56 dog cell; head-relative parts are offset from the
-// head origin.
+// Positions are in the 48x56 dog cell; face parts are relative to the head origin.
 
 export type Grid = readonly string[]
 
-/** Reverse each row (left/right flip). */
 export function mirror(grid: Grid): string[] {
   return grid.map((row) => [...row].reverse().join(''))
 }
 
-/**
- * Build a symmetric grid from its left half. `rightMap` recolours the mirrored half, so
- * highlights stay on the left (light comes from the top left).
- */
+/** `rightMap` recolours the mirrored half so highlights stay on the left. */
 export function sym(left: Grid, rightMap: Record<string, string> = {}): string[] {
   return left.map((row) => {
     const right = [...row].reverse().map((ch) => rightMap[ch] ?? ch).join('')
@@ -22,7 +16,7 @@ export function sym(left: Grid, rightMap: Record<string, string> = {}): string[]
 
 const LIGHT_LEFT = { T: 't' }
 
-// ── Head (origin = top-left of the 48-wide head band) ──────────────────────
+// Head origin is the top-left of the 48-wide head band.
 export const HEAD = sym(
   [
     '..................Tttaaa',
@@ -53,7 +47,7 @@ export interface Sprite {
   y: number
 }
 
-// Ears: the left ear (as seen on screen); the right one is its mirror image.
+// Paired parts are drawn for the on-screen left and mirrored for the right.
 export const EARS = {
   up: {
     grid: [
@@ -76,7 +70,6 @@ export const EARS = {
     x: 10,
     y: -11
   },
-  // Pinned back and out ("airplane ears"): mostly the dark back of the ear shows.
   back: {
     grid: [
       'xa..........',
@@ -92,7 +85,6 @@ export const EARS = {
     x: 3,
     y: -2
   },
-  // Flopped outwards, half-mast: sleepy.
   relaxed: {
     grid: [
       '.xa.........',
@@ -110,7 +102,6 @@ export const EARS = {
     x: 4,
     y: -6
   },
-  // Cocked sideways, inner ear facing forward: curious.
   side: {
     grid: [
       'xa..........',
@@ -128,19 +119,16 @@ export const EARS = {
 } satisfies Record<string, Sprite>
 export type EarKind = keyof typeof EARS
 
-// Eyes: left eye sprite; the right eye is mirrored. Positions are head-relative (left eye).
 export const EYES = {
   open: { grid: ['.kk.', 'kekk', 'kiik', '.kk.'], x: 16, y: 7 },
-  /** Lids half down: drowsy, and the in-between frame of a blink. */
   half: { grid: ['kkkk', 'kiik', '.kk.'], x: 16, y: 8 },
   closed: { grid: ['k..k', '.kk.'], x: 16, y: 9 },
   happy: { grid: ['.kk.', 'k..k'], x: 16, y: 8 },
-  /** Looking up from under drooping lids, eyes wet. */
   sad: { grid: ['..kk', '.kek', 'kiek', '.kk.'], x: 16, y: 7 }
 } satisfies Record<string, Sprite>
 export type EyeKind = keyof typeof EYES
 
-// Brows: the tan pips above the eyes move with the mood. 't' paints over the resting pip.
+// 't' paints over the resting brow pip.
 export const BROWS = {
   worried: { grid: ['.L', 'Lt'], x: 17, y: 5 },
   raised: { grid: ['LL', 'tt'], x: 17, y: 5 }
@@ -156,22 +144,17 @@ export const MOUTHS = {
     x: 20,
     y: 14
   },
-  /** Second panting frame: tongue drawn in a little. */
   pant2: { grid: ['.kkkkkk.', 'kMMMMMMk', 'kMppppMk', '.kpppPk.', '..pPPP..', '...PP...'], x: 20, y: 14 },
   frown: { grid: ['...kk...', '..kkkk..', '.k....k.'], x: 20, y: 14 },
   sleep: { grid: ['...kk...', '..k..k..'], x: 20, y: 14 },
-  /** Nose working, mouth shut. */
   sniff: { grid: ['...kk...', '...kk...'], x: 20, y: 14 },
-  /** A nervous lick of the nose. */
   lick: { grid: ['......pp', 'k..kk.pP', '.kk..kk.'], x: 20, y: 13 }
 } satisfies Record<string, Sprite>
 export type MouthKind = keyof typeof MOUTHS
 
 export const BLUSH: Sprite = { grid: ['cc'], x: 13, y: 11 }
 
-// ── Bodies (absolute dog-cell coordinates) ─────────────────────────────────
-// Sitting in three-quarter view: body side-on facing the bowl, head turned to the viewer.
-// Rows start at dog-cell row 20. Not mirrored: light still comes from the top left.
+// Bodies are side-on, so not mirrored.
 const SIT_BODY: Grid = [
   '.....................Aaaaax.....................',
   '....................Aaaaaaaax...................',
@@ -221,8 +204,6 @@ const COLLAR = sym([
   '.......................Y'
 ])
 
-// Lying in three-quarter view: body side-on behind the head, chin on the front paws.
-// Rows start at dog-cell row 34.
 const LIE_BODY: Grid = [
   '......................aaaaaaaaa.................',
   '..................Aaaaaaaaaaaaaaaa..............',
@@ -248,7 +229,6 @@ const LIE_BODY: Grid = [
   '......SSSSSSSSsssssssSSSSSSSSSSSSSSSSSSSSSS.....'
 ]
 
-// Front legs stretched out towards the viewer; the chin rests on them.
 const LIE_PAWS = sym([
   '................tTTTttsS',
   '...............tTTTTttsS',
@@ -261,9 +241,7 @@ const LIE_PAWS = sym([
   '...............sssssssSS'
 ])
 
-// Tail frames: drawn behind the body.
 export const TAILS = {
-  /** Hanging behind, the tip curled up. */
   rest: {
     grid: [
       '.aa.......',
@@ -334,7 +312,6 @@ export const TAILS = {
     x: -1,
     y: 44
   },
-  /** Held low and close: worried. */
   low: {
     grid: [
       '.....aa',
@@ -346,7 +323,6 @@ export const TAILS = {
     x: 1,
     y: 48
   },
-  /** Lying down: along the floor behind, the tip turned up. */
   flat: {
     grid: ['.aa......', 'aAaa.....', 'aaaat..aa', 'taaaaaaaa', 'ttaaaaaaa', '.tttttaa.', '..sssss..'],
     x: -1,
@@ -358,7 +334,6 @@ export type TailKind = keyof typeof TAILS
 export interface Pose {
   body: Grid
   bodyY: number
-  /** Where the 48-wide head band sits in the dog cell. */
   headX: number
   headY: number
   collar?: { grid: Grid; y: number }
@@ -383,7 +358,7 @@ export const POSES = {
 } satisfies Record<string, Pose>
 export type PoseKind = keyof typeof POSES
 
-// ── Props and overlays (scene coordinates) ─────────────────────────────────
+// Props and overlays use scene coordinates.
 export const BOWL: Grid = [
   'BBBBBBBBBBBBBb',
   'bbbbbbbbbbbbbd',
@@ -393,7 +368,7 @@ export const BOWL: Grid = [
   '...DDDDDDDD...'
 ]
 
-/** Kibble rows above the rim, bottom row first. Pixels fill from the bottom row up. */
+/** Rows above the rim, bottom row first. */
 export const KIBBLE: Grid = ['.gGgGgGgGgGgG.', '..gGgGgGgGgG..', '....gGgGgG....', '.....gGgG.....']
 
 export const OVERLAYS = {

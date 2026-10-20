@@ -1,6 +1,4 @@
-// Estimated USD per million tokens, Anthropic first-party list prices (checked 2026-10).
-// Used only to estimate Claude Code spend from local logs; edit here if prices change.
-// Cache writes are 1.25x input (5-minute TTL) or 2x input (1-hour TTL).
+// Estimated USD per million tokens (checked 2026-10). Edit here if prices change.
 
 interface Rate {
   input: number
@@ -29,7 +27,6 @@ const RATES: Array<[prefix: string, rate: Rate]> = [
   ['claude-3-5-haiku', { input: 0.8, output: 4, cacheRead: 0.08 }]
 ]
 
-// Unknown models fall back by family name.
 const FAMILY: Array<[word: string, rate: Rate]> = [
   ['fable', { input: 10, output: 50, cacheRead: 0.25 }],
   ['mythos', { input: 10, output: 50, cacheRead: 0.25 }],
@@ -38,10 +35,7 @@ const FAMILY: Array<[word: string, rate: Rate]> = [
   ['haiku', { input: 0.1, output: 0.5, cacheRead: 0.01 }]
 ]
 
-/**
- * For a model we don't recognise (say, one released after this table): the priciest rates, so a
- * USD budget errs towards "used more", never silently towards $0.
- */
+// Top-tier rates, so an unknown model errs towards overspend rather than $0.
 const UNKNOWN: Rate = { input: 10, output: 50, cacheRead: 1 }
 
 export function rateFor(model: string): Rate | null {
@@ -51,7 +45,6 @@ export function rateFor(model: string): Rate | null {
   return null
 }
 
-/** False when `model` isn't in the price table, so its cost is a top-tier estimate. */
 export function isPriced(model: string): boolean {
   return rateFor(model) !== null
 }
@@ -73,6 +66,5 @@ export function estimateCostUsd(model: string, t: TokenCounts, fast = false): nu
       t.cacheWrite1h * rate.input * 2 +
       t.cacheRead * rate.cacheRead) /
     1e6
-  // Fast mode is billed at 2x standard.
   return fast ? usd * 2 : usd
 }

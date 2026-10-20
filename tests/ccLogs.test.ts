@@ -114,7 +114,7 @@ describe('LogUsageProvider', () => {
     mkdirSync(project)
     const file = join(project, 'session.jsonl')
     const ts = new Date(Date.now() - 60_000).toISOString()
-    // Claude Code writes one line per content block, all sharing the response's usage.
+    // Claude Code logs one line per content block, each with the same usage.
     writeFileSync(file, [line({ id: 'msg_a', ts }), line({ id: 'msg_a', ts }), ''].join('\n'))
 
     let changes = 0

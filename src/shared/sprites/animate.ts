@@ -2,32 +2,28 @@ import type { MoodId } from '../types.ts'
 import type { FrameSpec } from './compose.ts'
 import type { EarKind, EyeKind, TailKind } from './parts.ts'
 
-/** Animation ticks per second. */
 export const FPS = 10
 
-/** One-off reactions layered on top of the mood. */
 export type Reaction = { kind: 'petted' | 'celebrate'; startTick: number }
 const REACTION_TICKS = { petted: 15, celebrate: 30 }
 
-/** One back-and-forth sweep of the tail. */
 const WAG: TailKind[] = ['wagMid', 'wagUp', 'wagMid', 'wagLow']
 const HOP = [0, -1, -3, -4, -3, -1, 0, 0]
 const BIG_HOP = [0, -2, -5, -7, -8, -7, -5, -2, 0, 0]
 
-/** `open` eyes, with a blink (half, closed, half) every `every` ticks. */
 function blink(tick: number, open: EyeKind, every = 42): EyeKind {
   const t = tick % every
   if (t === 1) return 'closed'
   return t === 0 || t === 2 ? 'half' : open
 }
 
-/** Pricked ears; every `every` ticks one of them swivels sideways for a moment, as if listening. */
+/** Every `every` ticks one ear swivels sideways for a moment. */
 function listening(tick: number, every: number): [EarKind, EarKind] {
   if ((tick + 40) % every >= 4) return ['up', 'up']
   return Math.floor(tick / every) % 2 ? ['up', 'side'] : ['side', 'up']
 }
 
-/** A heart (or zzz) that floats up from `fromY` and wobbles, `period` ticks per loop. */
+/** Drifts up from `fromY` with a wobble, looping every `period` ticks. */
 function floater(tick: number, period: number, x: number, phase = 0, fromY = 16): { x: number; y: number } {
   const t = (tick + phase) % period
   return { x: x + (Math.floor(t / 4) % 2), y: fromY - Math.floor((t / period) * 12) }
@@ -51,7 +47,6 @@ function base(bowl: number): FrameSpec {
   }
 }
 
-/** The frame to draw for a mood at an animation tick. */
 export function frameFor(mood: MoodId, tick: number, bowl: number, reaction?: Reaction | null): FrameSpec {
   const f = base(bowl)
 
@@ -70,7 +65,7 @@ export function frameFor(mood: MoodId, tick: number, bowl: number, reaction?: Re
     }
     case 'happy':
       f.eyes = blink(tick, 'open')
-      // Panting: tongue and head bob together.
+      // Tongue and head bob together.
       f.mouth = Math.floor(tick / 3) % 2 ? 'pant2' : 'pant'
       f.headDy = Math.floor(tick / 3) % 2
       f.blush = true
@@ -87,7 +82,7 @@ export function frameFor(mood: MoodId, tick: number, bowl: number, reaction?: Re
       f.ears = ['back', 'back']
       f.brows = 'worried'
       f.eyes = blink(tick, 'open', 30)
-      // Keeps glancing at the bowl, and licks its nose now and then.
+      // Glances at the bowl, licks its nose now and then.
       f.eyeShift = tick % 50 < 20 ? 1 : 0
       f.mouth = tick % 45 >= 41 ? 'lick' : 'frown'
       f.tail = 'low'
@@ -100,7 +95,7 @@ export function frameFor(mood: MoodId, tick: number, bowl: number, reaction?: Re
       f.eyes = blink(tick, 'sad', 50)
       f.mouth = 'frown'
       f.tail = 'flat'
-      // A heavy sigh now and then.
+      // An occasional heavy sigh.
       f.headDy = tick % 60 >= 52 ? 1 : 0
       if (tick % 40 >= 20) f.overlays.push({ kind: 'tear', x: 25, y: 48 + Math.floor(((tick % 40) - 20) / 5) })
       break
@@ -117,7 +112,6 @@ export function frameFor(mood: MoodId, tick: number, bowl: number, reaction?: Re
       )
       break
     case 'sniffing': {
-      // Cocks one ear, then the other, and works its nose.
       const side = Math.floor(tick / 30) % 2
       f.ears = side ? ['side', 'up'] : ['up', 'side']
       f.brows = 'raised'
@@ -139,7 +133,7 @@ export function frameFor(mood: MoodId, tick: number, bowl: number, reaction?: Re
       f.mouth = 'smile'
       f.blush = true
       if (f.pose === 'sit') {
-        // Ears go soft under the hand, then the tail gets going.
+        // Ears flatten under the hand, then the tail starts.
         f.ears = t < 10 ? ['back', 'back'] : ['up', 'up']
         f.tail = WAG[t % WAG.length]
       }

@@ -1,6 +1,4 @@
-// Anthropic API spend via the Admin API's Usage & Cost endpoints.
-// There is no endpoint for a prepaid balance, so "remaining" is either a monthly budget
-// minus month-to-date cost, or a balance the user typed in minus the cost since that date.
+// No balance endpoint, so what's left comes from a user-set budget or balance.
 
 import { fmtClock, fmtDuration, fmtPct, fmtTokens, fmtUsd } from '../../shared/format.ts'
 import type { ApiBalance, Settings, UsageSnapshot } from '../../shared/types.ts'
@@ -8,7 +6,6 @@ import type { ApiBalance, Settings, UsageSnapshot } from '../../shared/types.ts'
 const BASE = 'https://api.anthropic.com/v1/organizations'
 const POLL_MS = 5 * 60_000
 const MAX_BACKOFF_MS = 60 * 60_000
-/** A request that hangs longer than this is abandoned, so one stuck call can't stop polling. */
 const REQUEST_TIMEOUT_MS = 20_000
 
 type Fetch = typeof fetch
@@ -42,7 +39,7 @@ async function getAll(
       throw new Error(`Admin API ${path}: ${timedOut ? 'timed out' : 'could not reach api.anthropic.com'}`)
     }
     if (!res.ok) {
-      // Never include the key or headers in the error.
+      // Keep the key and headers out of the error.
       const hint = res.status === 401 || res.status === 403 ? ' (check the Admin key)' : ''
       throw new Error(`Admin API ${path}: HTTP ${res.status}${hint}`)
     }
@@ -54,7 +51,7 @@ async function getAll(
   return data
 }
 
-/** Daily cost in USD. The API reports amounts as decimal strings in cents. */
+/** Cost amounts come back as decimal strings in cents. */
 export async function fetchDailyCost(
   fetchImpl: Fetch,
   key: string,
@@ -76,7 +73,6 @@ export async function fetchDailyCost(
   }))
 }
 
-/** Total tokens (input, cache and output) since `startingAt`. */
 export async function fetchTokens(
   fetchImpl: Fetch,
   key: string,
@@ -185,7 +181,7 @@ export class ApiUsageProvider {
   private delay = POLL_MS
   private running = false
   private inFlight: Promise<void> | null = null
-  /** Bumped by reset(); a refresh that started under an older generation discards its result. */
+  /** Bumped by reset() so a refresh already in flight drops its result. */
   private generation = 0
 
   constructor(
@@ -207,7 +203,6 @@ export class ApiUsageProvider {
     this.timer = null
   }
 
-  /** Forget cached data (e.g. the key changed) and fetch again. A refresh already in flight is ignored. */
   reset(): void {
     this.generation++
     this.inFlight = null
@@ -225,7 +220,6 @@ export class ApiUsageProvider {
     return apiSnapshot(this.data, this.error, this.getConfig(), now)
   }
 
-  /** One refresh at a time; calls during a refresh share it. */
   refresh(): Promise<void> {
     if (this.inFlight) return this.inFlight
     const run: Promise<void> = this.doRefresh(this.generation).finally(() => {
@@ -251,7 +245,7 @@ export class ApiUsageProvider {
         fetchDailyCost(this.fetchImpl, key, from, this.timeoutMs),
         fetchTokens(this.fetchImpl, key, monthStart.toISOString(), this.timeoutMs)
       ])
-      if (generation !== this.generation) return // reset() ran meanwhile; its refresh owns the data
+      if (generation !== this.generation) return
       this.data = { days, monthTokens, fetchedAt: now }
       this.error = null
       this.delay = POLL_MS

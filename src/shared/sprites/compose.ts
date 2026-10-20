@@ -27,7 +27,7 @@ import {
 
 export const SCENE_W = 64
 export const SCENE_H = 64
-/** Width of the dog cell (parts mirror around its centre), and where it sits in the scene. */
+/** Paired parts mirror around the centre of the dog cell. */
 export const CELL = 48
 export const DOG_X = 2
 export const DOG_Y = 8
@@ -41,7 +41,7 @@ export interface Crop {
   h: number
 }
 
-/** 32x32 crops of the scene around the head in each pose (ear tips down to the collar or paws), for icons. */
+/** Head crops for icons. */
 export const PORTRAITS: Record<PoseKind, Crop> = {
   sit: { x: DOG_X + 15, y: DOG_Y - 1, w: 32, h: 32 },
   lie: { x: DOG_X + 14, y: DOG_Y + 23, w: 32, h: 32 }
@@ -49,35 +49,28 @@ export const PORTRAITS: Record<PoseKind, Crop> = {
 
 export interface FrameSpec {
   pose: PoseKind
-  /** Left and right ear, as seen on screen. */
+  /** Left and right as seen on screen. */
   ears: [EarKind, EarKind]
   eyes: EyeKind
   brows: BrowKind | null
-  /** Horizontal glance, in pixels. */
   eyeShift: number
   mouth: MouthKind
   tail: TailKind
   blush: boolean
-  /** Whole-dog vertical offset (negative = up), for hops. */
   dy: number
-  /** Head-only offsets, for tilts and breathing. */
   headDx: number
   headDy: number
-  /** 0..1 kibble in the bowl. */
+  /** Kibble level, 0..1. */
   bowl: number
   overlays: Array<{ kind: OverlayKind; x: number; y: number }>
 }
 
 export type Scene = Uint8Array
 
-/** A drawing layer: palette index per pixel, -1 where empty. */
+/** Palette index per pixel, -1 where empty. */
 type Layer = Int16Array
 
-/**
- * How a layer's 1px outline is applied when it is committed to the scene:
- * 'hard' draws over whatever is underneath (separates overlapping parts), 'soft' only
- * fills transparent pixels, 'none' draws no outline (face details, collar).
- */
+/** 'hard' outlines draw over what's underneath, 'soft' only fill transparent pixels. */
 type OutlineMode = 'hard' | 'soft' | 'none'
 
 function newLayer(): Layer {
@@ -99,10 +92,7 @@ function put(layer: Layer, grid: Grid, x: number, y: number): void {
   }
 }
 
-/**
- * Put a left-side sprite at `relX` within the dog cell starting at `originX`, or its mirror
- * image on the right side. `shift` moves it sideways (e.g. a glance).
- */
+/** 'r' mirrors the left-side sprite across the dog cell. */
 function putSide(layer: Layer, s: Sprite, side: 'l' | 'r', originX: number, y: number, shift = 0): void {
   if (side === 'l') return put(layer, s.grid, originX + s.x + shift, y + s.y)
   const w = Math.max(...s.grid.map((r) => r.length))
@@ -134,7 +124,6 @@ function commit(scene: Scene, layer: Layer, mode: OutlineMode): void {
   for (let i = 0; i < layer.length; i++) if (layer[i] >= 0) scene[i] = layer[i]
 }
 
-/** Draw a single sprite as its own layer. */
 function draw(scene: Scene, mode: OutlineMode, fill: (layer: Layer) => void): void {
   const layer = newLayer()
   fill(layer)
@@ -146,7 +135,7 @@ function putKibble(layer: Layer, fill: number): void {
   let left = Math.round(Math.min(1, Math.max(0, fill)) * total)
   for (let r = 0; r < KIBBLE.length && left > 0; r++) {
     const row = KIBBLE[r]
-    // Fill each row from the centre outwards so a partial row looks like a small mound.
+    // Centre outwards, so a partial row looks like a small mound.
     const cols = [...row].map((ch, c) => ({ ch, c })).filter((p) => p.ch !== '.')
     const mid = (row.length - 1) / 2
     cols.sort((a, b) => Math.abs(a.c - mid) - Math.abs(b.c - mid))
@@ -157,7 +146,6 @@ function putKibble(layer: Layer, fill: number): void {
   }
 }
 
-/** Render one frame to a SCENE_W x SCENE_H buffer of palette indices. */
 export function composeScene(spec: FrameSpec): Scene {
   const scene: Scene = new Uint8Array(SCENE_W * SCENE_H)
   const pose: Pose = POSES[spec.pose]
@@ -166,7 +154,7 @@ export function composeScene(spec: FrameSpec): Scene {
   const hx = ox + pose.headX + spec.headDx
   const hy = oy + pose.headY + spec.headDy
 
-  // Back to front. Each part gets its own outline so overlapping parts stay readable.
+  // Back to front, each part with its own outline so overlaps stay readable.
   const tail = TAILS[spec.tail]
   draw(scene, 'soft', (l) => put(l, tail.grid, ox + tail.x, oy + tail.y))
   draw(scene, 'soft', (l) => {
@@ -195,7 +183,6 @@ export function composeScene(spec: FrameSpec): Scene {
   return scene
 }
 
-/** Convert a scene to RGBA (or BGRA) bytes, scaled up by an integer factor with hard pixel edges. */
 export function sceneToBitmap(
   scene: Scene,
   palette: ReadonlyArray<[number, number, number]>,

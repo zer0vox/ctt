@@ -17,15 +17,10 @@ export const DEFAULT_SETTINGS: Settings = {
   api: { enabled: true, monthlyBudgetUsd: null, balance: null }
 }
 
-/**
- * Bumped when a size step changes meaning. v0.1 drew a 48x40 scene; the German Shepherd's scene
- * is 64x64, so a size saved before then moves one step down to stay about as big on screen.
- */
+// Bump when a scale step changes size; older saves load one step smaller.
 const SIZE_VERSION = 2
 
-// ── Validation ───────────────────────────────────────────────────────────
-// config.json can be hand-edited, half-written or from another version, and renderer patches
-// arrive over IPC. Every field is checked; anything invalid keeps the previous value.
+// Saved config and IPC patches are untrusted; invalid fields keep the old value.
 
 const METRICS: readonly BudgetMetric[] = ['usd', 'tokens']
 const PERIODS: readonly BudgetPeriod[] = ['block', 'day', 'week', 'month']
@@ -40,7 +35,7 @@ function pick<T>(v: unknown, ok: (v: unknown) => v is T, fallback: T): T {
   return ok(v) ? v : fallback
 }
 
-/** `null` clears, a valid value replaces, a missing or invalid one keeps `fallback`. */
+/** `null` clears; a missing or invalid value keeps `fallback`. */
 function nullable<T>(
   source: Record<string, unknown>,
   key: string,
@@ -74,7 +69,6 @@ function position(v: unknown): { x: number; y: number } | undefined {
   return isNum(p.x) && isNum(p.y) ? { x: Math.round(p.x), y: Math.round(p.y) } : undefined
 }
 
-/** Apply `raw` (a saved config or a patch) on top of `base`, keeping only valid values. */
 export function mergeSettings(base: Settings, raw: unknown): Settings {
   const r = obj(raw)
   const plan = obj(r.plan)
@@ -103,14 +97,12 @@ export function mergeSettings(base: Settings, raw: unknown): Settings {
   }
 }
 
-/** Settings in config.json; the Admin API key encrypted with the OS keystore (DPAPI on Windows) in api-key.bin. */
 export class SettingsStore {
   private readonly file: string
   private readonly keyFile: string
   private cachedKey: string | null | undefined
-  /** Saves run one at a time, each on top of the last, so quick successive changes can't race. */
+  // Serializes saves so quick successive changes can't race.
   private queue: Promise<unknown> = Promise.resolve()
-  /** True when there was no config file yet (first launch). */
   readonly firstRun: boolean
   data: Settings
 
@@ -132,10 +124,7 @@ export class SettingsStore {
     }
   }
 
-  /**
-   * Validate, save, then apply. If the save fails the in-memory settings stay as they were (so
-   * nothing claims a change that won't survive a restart) and the error says why.
-   */
+  /** Applies in memory only once the write succeeds. */
   update(patch: SettingsPatch): Promise<Settings> {
     const run = async (): Promise<Settings> => {
       const next = mergeSettings(this.data, patch)
@@ -170,7 +159,7 @@ export class SettingsStore {
       try {
         this.cachedKey = safeStorage.decryptString(readFileSync(this.keyFile))
       } catch {
-        // Unreadable (e.g. copied from another Windows account): treat as no key.
+        // e.g. encrypted under another Windows account; treat as no key.
       }
     }
     return this.cachedKey

@@ -1,10 +1,4 @@
-// Claude plan limits (Pro, Max, Team, Enterprise). Three sources, newest wins:
-//  - live: Anthropic's usage endpoint, polled with the user's Claude Code login (opt-in, see oauthUsage.ts);
-//  - bridge: the state file the status line bridge writes (only when Claude Code runs in a terminal);
-//  - cache: Claude Code's own copy in ~/.claude.json (`cachedUsageUtilization`), refreshed when it
-//    checks usage (the usage banner, /usage).
-// The live and cache shapes are undocumented internals, so anything unexpected is ignored, and only
-// the usage numbers are kept.
+// Live and cache payloads are undocumented, so anything unexpected is ignored.
 
 import { existsSync, readFileSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { basename, dirname } from 'node:path'
@@ -30,7 +24,6 @@ export interface PlanState {
 
 export type PlanSource = 'live' | 'bridge' | 'cache'
 
-/** After this long without a Claude Code session the numbers may be out of date. */
 export const STALE_AFTER_MS = 30 * 60_000
 
 const WINDOWS = [
@@ -61,7 +54,7 @@ export function planSnapshots(state: PlanState | null, now: number): UsageSnapsh
     const seenAt = state.rateLimitsSeenAt ?? state.updatedAt
     const resetsAt = win.resets_at ? win.resets_at * 1000 : undefined
     if (resetsAt && resetsAt <= now) {
-      // The window has rolled over since we last heard; nothing has been used in the new one yet.
+      // Rolled over since the last reading, so the new window starts at 0.
       out.push({
         id: w.id,
         short: w.short,
@@ -102,7 +95,6 @@ function bridgeWindow(w: unknown): PlanWindow | null {
   return used === null ? null : { used_percentage: used, resets_at: num(win?.resets_at) }
 }
 
-/** The bridge's plan-state.json, field by field: anything malformed is dropped, not trusted. */
 export function parseBridgeState(parsed: unknown): PlanState | null {
   const o = parsed as Record<string, unknown> | null
   if (!o || typeof o !== 'object') return null
@@ -136,10 +128,7 @@ function usageWindow(w: unknown): PlanWindow | null {
   return { used_percentage: pct, resets_at: Number.isNaN(resets) ? null : Math.floor(resets / 1000) }
 }
 
-/**
- * Plan usage from Anthropic's usage payload (the live response, or the copy Claude Code caches).
- * Reads `five_hour` / `seven_day`, falling back to the `limits` list (session / weekly_all).
- */
+/** Parses the live usage response or Claude Code's cached copy of it. */
 export function planStateFromUsage(usage: unknown, fetchedAt: number, source: PlanSource): PlanState | null {
   const u = usage as { five_hour?: unknown; seven_day?: unknown; limits?: unknown } | null
   if (!u || typeof u !== 'object') return null
@@ -159,7 +148,7 @@ export function planStateFromUsage(usage: unknown, fetchedAt: number, source: Pl
   }
 }
 
-/** Plan usage from the `cachedUsageUtilization` block of Claude Code's ~/.claude.json, if present. */
+/** `config` is Claude Code's ~/.claude.json. */
 export function parseUsageCache(config: unknown): PlanState | null {
   const cache = (config as { cachedUsageUtilization?: { fetchedAtMs?: unknown; utilization?: unknown } })
     ?.cachedUsageUtilization
@@ -175,17 +164,13 @@ export function readUsageCache(file: string): PlanState | null {
   }
 }
 
-/** The freshest of several readings. */
 export function newestPlanState(...states: Array<PlanState | null>): PlanState | null {
   let best: PlanState | null = null
   for (const s of states) if (s && (!best || (s.rateLimitsSeenAt ?? 0) > (best.rateLimitsSeenAt ?? 0))) best = s
   return best
 }
 
-/**
- * Watches the bridge's state file and Claude Code's usage cache, and merges in the live reading.
- * Re-evaluates on a timer because resets and staleness are time-based.
- */
+/** Also reloads on a timer, since resets and staleness are time-based. */
 export class PlanLimitsProvider {
   private watcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
@@ -201,7 +186,7 @@ export class PlanLimitsProvider {
   ) {}
 
   start(): void {
-    this.reload() // also arms the folder watcher
+    this.reload()
     this.timer = setInterval(() => this.reload(), 15_000)
   }
 
@@ -223,20 +208,18 @@ export class PlanLimitsProvider {
       this.watcher = watch(dir, (_event, name) => {
         if (name === basename(this.stateFile)) this.reload()
       })
-      // Windows reports EPERM when the folder is deleted or locked. An unhandled 'error' event
-      // would crash the main process; drop the watcher and let the next reload re-arm it.
+      // An unhandled fs.watch 'error' event crashes the main process.
       this.watcher.on('error', () => {
         this.watcher?.close()
         this.watcher = null
       })
     } catch {
-      // The 15s timer still picks up changes.
+      // The timer still picks up changes.
     }
   }
 
   private reload(): void {
     this.bridgeState = readPlanState(this.stateFile)
-    // ~/.claude.json changes often for unrelated reasons; only re-parse when it was written.
     try {
       const mtime = statSync(this.cacheFile).mtimeMs
       if (mtime !== this.cacheMtime) {

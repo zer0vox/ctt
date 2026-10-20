@@ -1,6 +1,5 @@
 import { crc32, deflateSync } from 'node:zlib'
 
-/** Minimal RGBA PNG encoder (no dependencies). */
 export function encodePng(rgba: Uint8Array, width: number, height: number): Buffer {
   const chunk = (type: string, data: Buffer): Buffer => {
     const len = Buffer.alloc(4)
@@ -14,7 +13,7 @@ export function encodePng(rgba: Uint8Array, width: number, height: number): Buff
   ihdr.writeUInt32BE(width, 0)
   ihdr.writeUInt32BE(height, 4)
   ihdr.writeUInt8(8, 8) // bit depth
-  ihdr.writeUInt8(6, 9) // RGBA
+  ihdr.writeUInt8(6, 9) // colour type: RGBA
   const raw = Buffer.alloc((width * 4 + 1) * height)
   for (let y = 0; y < height; y++) {
     raw[y * (width * 4 + 1)] = 0

@@ -1,12 +1,5 @@
 #!/usr/bin/env node
-// Token Pup bridge for Claude Code's status line.
-//
-// Claude Code pipes session JSON to the status line command on stdin. For Pro/Max plans it
-// includes `rate_limits.five_hour` / `rate_limits.seven_day` (used_percentage, resets_at).
-// This script keeps only those numbers plus a few session totals, writes them next to itself
-// as plan-state.json for the Token Pup widget, and prints a short status line.
-//
-// Privacy: paths, prompts and transcript content in the input are never written anywhere.
+// Keeps only usage numbers from the input, never writes paths or prompts.
 
 import { execSync } from 'node:child_process'
 import { readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -34,7 +27,7 @@ let raw = ''
 try {
   raw = readFileSync(0, 'utf8')
 } catch {
-  // No stdin: still print something sensible below.
+  // No stdin, still print a line.
 }
 let input = {}
 try {
@@ -49,8 +42,7 @@ const fiveHour = pickWindow(limits.five_hour)
 const sevenDay = pickWindow(limits.seven_day)
 const now = Date.now()
 
-// A window can be missing before the first API response of a session, or after it resets.
-// Keep the last known value; the widget treats a past resets_at as a fresh window.
+// A window can be absent early in a session or after a reset, so keep the last.
 const state = {
   updatedAt: now,
   rateLimitsSeenAt: fiveHour || sevenDay ? now : (prev.rateLimitsSeenAt ?? null),
@@ -68,11 +60,11 @@ try {
   try {
     renameSync(tmp, STATE_FILE)
   } catch {
-    // Windows can refuse the rename while the widget is reading; fall back to a direct write.
+    // Windows can refuse the rename while the widget has the file open.
     writeFileSync(STATE_FILE, JSON.stringify(state))
   }
 } catch {
-  // Never break the user's status line because the state file couldn't be written.
+  // A failed write must not break the status line.
 }
 
 function pct(w) {
@@ -81,17 +73,16 @@ function pct(w) {
   return `${Math.round(w.used_percentage)}%`
 }
 
-// If another status line command was installed before Token Pup, show its output instead.
+// Prefer the output of a status line command that was installed before this one.
 let line = null
 const chain = readJson(CONFIG_FILE)?.chain?.command
 if (typeof chain === 'string' && chain.trim()) {
   try {
     line = execSync(chain, { input: raw, encoding: 'utf8', timeout: 5000, windowsHide: true })
   } catch {
-    line = null // Fall back to our own line.
+    line = null
   }
 }
-// No process.exit(): exiting straight after a write can cut off output going to a pipe.
-// Let the script end on its own once stdout has flushed.
-process.stdout.write(line ?? `🐶 5h ${pct(state.five_hour)} · 7d ${pct(state.seven_day)}`)
+// process.exit right after a write can truncate piped output.
+process.stdout.write(line ?? `5h ${pct(state.five_hour)} · 7d ${pct(state.seven_day)}`)
 process.exitCode = 0

@@ -7,12 +7,11 @@ import type { MoodId, PetState } from '../shared/types.ts'
 
 const iconCache = new Map<string, NativeImage>()
 
-/** The dog in a given mood as an icon (drawn from the same sprites as the pet). */
 export function moodIcon(mood: MoodId, scale = 1): NativeImage {
   const key = `${mood}@${scale}`
   const cached = iconCache.get(key)
   if (cached) return cached
-  // Use a frame without blinking or floating overlays.
+  // A frame with no blink, minus the floating overlays.
   const spec = frameFor(mood, 5, 1)
   spec.overlays = []
   spec.dy = 0

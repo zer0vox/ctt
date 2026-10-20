@@ -195,15 +195,15 @@ describe('OAuthUsageProvider reset', () => {
       fetchImpl,
       readToken
     )
-    p.start() // the first check waits on the token
+    p.start()
     await vi.waitFor(() => expect(held).toHaveLength(1))
     enabled = false
-    p.reset() // the app does this when the setting changes
+    p.reset() // as the app does when the setting changes
     await p.refresh()
     expect(p.liveStatus().state).toBe('off')
-    held[0]() // the old check finally gets its token
+    held[0]()
     await new Promise((r) => setTimeout(r, 20))
-    enabled = true // only so state() would show data if any had been stored
+    enabled = true // so state() would show any data that was stored
     expect(p.state()).toBeNull()
     p.stop()
   })

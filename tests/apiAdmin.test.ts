@@ -128,7 +128,7 @@ describe('apiSnapshot', () => {
 describe('ApiUsageProvider', () => {
   const cfg = () => ({ enabled: true, monthlyBudgetUsd: 100, balance: null })
 
-  /** A fetch that never answers, but honours its abort signal like the real one. */
+  // Never answers, but honours the abort signal like real fetch.
   const hang = ((_url: string, init?: RequestInit) =>
     new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))
@@ -148,7 +148,7 @@ describe('ApiUsageProvider', () => {
 
   it('ignores a refresh that was still running when the key changed', async () => {
     const held: Array<() => void> = []
-    // The old key's requests hang until released and then report $90 spent; the new key's answer at once with $0.
+    // Old-key requests hang until released, then report $90; new-key ones return $0.
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       const key = new Headers(init?.headers).get('x-api-key') ?? ''
       if (key.endsWith('old')) await new Promise<void>((r) => held.push(r))
@@ -171,7 +171,6 @@ describe('ApiUsageProvider', () => {
     expect(p.snapshot()?.usedFraction).toBe(0)
     for (const release of held) release()
     await old
-    // The old key's late $90 answer must not replace the new key's data.
     expect(p.snapshot()?.usedFraction).toBe(0)
     p.stop()
   })

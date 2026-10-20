@@ -2,7 +2,6 @@ import { app, BrowserWindow, screen } from 'electron'
 import { join } from 'node:path'
 import { SCENE_H, SCENE_W } from '../shared/sprites/compose.ts'
 
-/** Space above the dog for the hover card, and below it for the HUD bars. */
 const CARD_H = 160
 const HUD_H = 56
 const MIN_W = 232
@@ -13,10 +12,7 @@ export function petSize(scale: number): { width: number; height: number } {
 
 const preload = (): string => join(__dirname, '../preload/index.js')
 
-/**
- * Our pages never open windows or navigate away; refuse both so a stray link or injected
- * script can't load other content into a window that has the preload bridge.
- */
+// A window with the preload bridge must never load foreign content.
 function lockDown(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (e, url) => {
@@ -34,23 +30,19 @@ function loadPage(win: BrowserWindow, page: 'index' | 'settings'): void {
 type Point = { x: number; y: number }
 type Size = { width: number; height: number }
 
-/**
- * Keep the dog and its stats bar on the screen they're nearest to. Only the transparent space
- * above the dog (where the hover card appears) may hang off the top edge.
- */
+/** Only the hover-card space above the dog may hang off the top edge. */
 export function clampPosition(pos: Point, size: Size): Point {
   const a = screen.getDisplayNearestPoint({
     x: Math.round(pos.x + size.width / 2),
     y: Math.round(pos.y + size.height - 1)
   }).workArea
-  // `+ 0` turns -0 into 0: Math.round(-0.4) is -0, and Electron's setPosition rejects -0.
+  // `+ 0` turns -0 into 0, which Electron's setPosition rejects.
   return {
     x: Math.round(Math.min(Math.max(pos.x, a.x), a.x + a.width - size.width)) + 0,
     y: Math.round(Math.min(Math.max(pos.y, a.y - CARD_H), a.y + a.height - size.height)) + 0
   }
 }
 
-/** Bottom-right corner of the primary display, above the taskbar. */
 export function defaultPosition(size: Size): Point {
   const a = screen.getPrimaryDisplay().workArea
   return { x: a.x + a.width - size.width - 24, y: a.y + a.height - size.height }
@@ -58,7 +50,7 @@ export function defaultPosition(size: Size): Point {
 
 export function createPetWindow(scale: number, saved: Point | null): BrowserWindow {
   const size = petSize(scale)
-  // A saved spot may be off screen now (e.g. a monitor was unplugged); pull it back.
+  // The saved spot may be off screen if a monitor was unplugged.
   const pos = saved ? clampPosition(saved, size) : defaultPosition(size)
   const win = new BrowserWindow({
     ...pos,
@@ -73,21 +65,20 @@ export function createPetWindow(scale: number, saved: Point | null): BrowserWind
     skipTaskbar: true,
     alwaysOnTop: true,
     hasShadow: false,
-    // Clicking the pet shouldn't take focus away from whatever you're working in.
     focusable: false,
     show: false,
     title: 'Token Pup',
     webPreferences: { preload: preload(), contextIsolation: true, nodeIntegration: false, sandbox: true }
   })
   win.setAlwaysOnTop(true, 'floating')
-  // Transparent areas pass clicks through; the renderer turns this off while the cursor is over the dog.
+  // The renderer turns this off while the cursor is over the dog.
   win.setIgnoreMouseEvents(true, { forward: true })
   win.once('ready-to-show', () => win.showInactive())
   loadPage(win, 'index')
   return win
 }
 
-/** Resize the pet, keeping its bottom-right corner where it was. */
+/** Keeps the bottom-right corner in place. */
 export function resizePet(win: BrowserWindow, scale: number): void {
   const old = win.getBounds()
   const size = petSize(scale)
@@ -113,15 +104,14 @@ export function createSettingsWindow(icon: Electron.NativeImage): BrowserWindow 
   return win
 }
 
-/** Moves the pet with the cursor while dragging (main-process polling stays smooth across DPI changes). */
+/** Polls the cursor from main, which stays smooth across DPI changes. */
 export class PetDrag {
   private timer: NodeJS.Timeout | null = null
   private onEnd: (() => void) | null = null
 
   start(win: BrowserWindow, offset: Point, onEnd: (pos: Point) => void): void {
     this.stop()
-    // The renderer starts the drag after a few pixels of movement; `offset` is that distance,
-    // so the window catches up with the cursor instead of lagging behind it.
+    // `offset` is how far the cursor moved before the renderer started the drag.
     const startCursor = screen.getCursorScreenPoint()
     const { x: wx, y: wy, width, height } = win.getBounds()
     this.onEnd = () => {

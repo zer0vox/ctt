@@ -26,7 +26,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 const readSettings = (): any => JSON.parse(readFileSync(paths.claudeSettings, 'utf8'))
 
 function runBridge(input: unknown): string {
-  // Run outside Electron's environment so `node` behaves like Claude Code's shell.
+  // Run node as Claude Code would, outside Electron's environment.
   const env = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE
   return execFileSync('node', [join(paths.dataDir, 'statusline.mjs')], {
@@ -97,7 +97,7 @@ describe('statusline bridge script', () => {
         seven_day: { used_percentage: 18, resets_at: resets + 86400 }
       }
     })
-    expect(out).toBe('🐶 5h 42% · 7d 18%')
+    expect(out).toBe('5h 42% · 7d 18%')
     const raw = readFileSync(join(paths.dataDir, 'plan-state.json'), 'utf8')
     expect(raw).not.toContain('someone')
     expect(raw).not.toContain('abc')
@@ -117,7 +117,7 @@ describe('statusline bridge script', () => {
 
   it('survives empty or invalid input', async () => {
     await installBridge(paths, SCRIPT)
-    expect(runBridge('not an object')).toBe('🐶 5h – · 7d –')
+    expect(runBridge('not an object')).toBe('5h – · 7d –')
   })
 })
 

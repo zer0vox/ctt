@@ -14,5 +14,5 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  # Restores Claude Code's status line on uninstall (see the file for details).
+  # Restores Claude Code's status line on uninstall.
   include: build/installer.nsh

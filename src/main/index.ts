@@ -29,7 +29,7 @@ import { SettingsStore } from './settings.ts'
 import { buildMenu, createTray, moodIcon, tooltip } from './tray.ts'
 import { createPetWindow, createSettingsWindow, PetDrag, resizePet } from './window.ts'
 
-// Keep all data in %APPDATA%\token-pup, where the status line bridge writes too.
+// Must match the folder the status line bridge writes to.
 app.setPath('userData', join(app.getPath('appData'), 'token-pup'))
 app.setAppUserModelId('com.tokenpup.app')
 
@@ -38,8 +38,7 @@ const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
 const bridgePaths: BridgePaths = { claudeSettings: join(claudeDir, 'settings.json'), dataDir }
 
 if (process.argv.includes('--uninstall-bridge')) {
-  // Run by the Windows uninstaller (build/installer.nsh) so Claude Code's status line goes back
-  // to what it was before Token Pup. No windows, no single-instance lock.
+  // Called by the NSIS uninstaller (build/installer.nsh).
   void uninstallBridge(bridgePaths)
     .catch((e) => console.error(e))
     .finally(() => app.exit(0))
@@ -62,7 +61,7 @@ if (process.argv.includes('--uninstall-bridge')) {
     }, 200)
   }
 
-  // Claude Code keeps its global config (with a cached copy of plan usage) next to the config dir.
+  // Claude Code caches plan usage in .claude.json.
   const claudeConfig = process.env.CLAUDE_CONFIG_DIR
     ? join(process.env.CLAUDE_CONFIG_DIR, '.claude.json')
     : join(homedir(), '.claude.json')
@@ -75,7 +74,6 @@ if (process.argv.includes('--uninstall-bridge')) {
     }
   )
   const plan = new PlanLimitsProvider(join(dataDir, STATE_FILE), claudeConfig, () => live.state(), scheduleUpdate)
-  // New Claude Code activity in the logs is a good moment for a fresh live reading.
   const logs = new LogUsageProvider(join(claudeDir, 'projects'), () => {
     live.nudge()
     scheduleUpdate()
@@ -98,7 +96,6 @@ if (process.argv.includes('--uninstall-bridge')) {
 
   const publish = (state: PetState): void => {
     if (pet && !pet.isDestroyed()) pet.webContents.send('state', state)
-    // The settings window shows the live face and headline too.
     if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('state', state)
     if (tray) {
       tray.setImage(moodIcon(state.mood))
@@ -124,7 +121,6 @@ if (process.argv.includes('--uninstall-bridge')) {
 
   const aggregator = new Aggregator(collect, () => store.data.primary, publish, notify)
 
-  /** Errors from tray clicks, drags and timers: log and tell the user instead of throwing out of an event handler. */
   const reportError = (e: unknown): void => {
     console.error(e)
     if (Notification.isSupported()) {
@@ -156,7 +152,7 @@ if (process.argv.includes('--uninstall-bridge')) {
       return
     }
     settingsWin = createSettingsWindow(moodIcon('happy', 4))
-    // A reloaded settings page starts with the preview switch off, so end any preview too.
+    // A reload resets the preview toggle, so drop any active preview.
     settingsWin.webContents.on('did-start-loading', () => aggregator.setPreview(null))
     settingsWin.on('closed', () => {
       settingsWin = null
@@ -183,7 +179,6 @@ if (process.argv.includes('--uninstall-bridge')) {
     return view()
   }
 
-  /** Save from a tray click: on failure nothing changes and the user is told why. */
   const saveFromMenu = (patch: SettingsPatch): void => {
     savePatch(patch)
       .catch(reportError)
@@ -201,8 +196,6 @@ if (process.argv.includes('--uninstall-bridge')) {
     quit: () => app.quit()
   }
 
-  // ── IPC ──────────────────────────────────────────────────────────────────
-  // Only our own pages may talk to main, and each handler only answers the window that uses it.
   const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
   const ourPage = (url: string | undefined): boolean =>
     !!url && (url.startsWith('file://') || (!!devUrl && url.startsWith(devUrl)))
@@ -262,7 +255,6 @@ if (process.argv.includes('--uninstall-bridge')) {
   on('pet:drag-start', 'pet', (offset: { x: number; y: number }) => {
     if (!pet || pet.isDestroyed() || store.data.clickThrough) return
     const o = { x: Math.round(Number(offset?.x)) || 0, y: Math.round(Number(offset?.y)) || 0 }
-    // The pup has moved either way; only remembering the spot can fail.
     drag.start(pet, o, (position) => void store.update({ position }).catch(reportError))
   })
   on('pet:drag-end', 'pet', () => drag.stop())
@@ -270,9 +262,8 @@ if (process.argv.includes('--uninstall-bridge')) {
     if (pet && !pet.isDestroyed()) buildMenu(aggregator.state(), menuActions).popup({ window: pet })
   })
 
-  // ── Lifecycle ────────────────────────────────────────────────────────────
   app.on('second-instance', openSettings)
-  // The tray keeps the app alive when the settings window closes.
+  // Stay alive in the tray when all windows close.
   app.on('window-all-closed', () => {})
   app.on('before-quit', () => {
     drag.stop()
@@ -298,11 +289,10 @@ if (process.argv.includes('--uninstall-bridge')) {
     logs.start()
     api.start()
     aggregator.update()
-    // Countdowns and staleness are time-based, so refresh even when no data changes.
+    // Countdowns and staleness change even when no data does.
     setInterval(() => aggregator.update(), 30_000)
 
     if (store.data.startOnLogin) setStartOnLogin(true)
-    // First run: save defaults and open settings so the user can connect a data source.
     if (store.firstRun) {
       store.update({}).catch(reportError)
       openSettings()

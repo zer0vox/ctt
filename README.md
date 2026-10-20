@@ -1,4 +1,4 @@
-# Token Pup 🐶
+# Token Pup
 
 A pixel-art German Shepherd for your Windows desktop (sitting side-on by its bowl, face turned to you) whose mood tracks how much Claude usage you have left. A full bowl means a happy pup; an empty bowl means a sleepy one.
 
@@ -39,7 +39,7 @@ Token Pup merges three sources and always uses the newest reading:
    - Read from `cachedUsageUtilization` in `~/.claude.json`. Only the percentages are kept.
    - Always on, but it only refreshes when Claude Code checks usage (the usage banner, `/usage`).
 3. **Status line bridge** (Pro/Max in a terminal)
-   - Claude Code passes `rate_limits` to its [status line](https://code.claude.com/docs/en/statusline) command. The bridge (`bridge/statusline.mjs`) saves those numbers and prints `🐶 5h 42% · 7d 18%`. If you already had a status line, it shows that one's output instead.
+   - Claude Code passes `rate_limits` to its [status line](https://code.claude.com/docs/en/statusline) command. The bridge (`bridge/statusline.mjs`) saves those numbers and prints `5h 42% · 7d 18%`. If you already had a status line, it shows that one's output instead.
    - The VS Code panel doesn't run status lines, and the docs only list Pro and Max for `rate_limits`.
    - The bridge runs as `node statusline.mjs`, so it needs Node.js on your PATH. Installing it checks for Node first.
    - The first install backs up `~/.claude/settings.json` and remembers any status line you had. Removing the bridge, or uninstalling Token Pup, puts that status line back.

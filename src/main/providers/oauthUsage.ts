@@ -1,13 +1,4 @@
-// Live plan usage from Anthropic, using the login Claude Code saved on this computer.
-//
-// Claude Code fills its usage banner and /usage from GET /api/oauth/usage with the user's OAuth
-// token. This provider makes the same read-only request every few minutes, so plan limits stay
-// current however Claude Code is run (VS Code panel, terminal, JetBrains, desktop app) and also
-// reflect claude.ai usage. It is unofficial and opt-in.
-//
-// The token is read fresh for each request (Claude Code rotates it), is only ever sent to
-// api.anthropic.com, and is never stored, logged, or refreshed by Token Pup. An expired login
-// is left for Claude Code to renew.
+// Undocumented, opt-in. Token read per request, never stored or refreshed.
 
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
@@ -16,9 +7,7 @@ import { planStateFromUsage, type PlanState } from './planLimits.ts'
 
 const ENDPOINT = 'https://api.anthropic.com/api/oauth/usage'
 const POLL_MS = 5 * 60_000
-/** While Claude Code is active, refresh at most this often. */
 const NUDGE_MIN_MS = 90_000
-/** How often to look for a renewed login after it expired (a local file read, no network). */
 const LOGIN_CHECK_MS = 2 * 60_000
 const MAX_BACKOFF_MS = 30 * 60_000
 
@@ -53,7 +42,6 @@ function keychainCredentials(): Promise<string | null> {
   })
 }
 
-/** Claude Code keeps its login in the macOS Keychain, or in <config dir>/.credentials.json elsewhere. */
 export async function readClaudeToken(
   claudeDir: string,
   platform: NodeJS.Platform = process.platform
@@ -84,7 +72,7 @@ export class OAuthUsageProvider {
   private running = false
   private inFlight: Promise<void> | null = null
   private lastAttempt = 0
-  /** Bumped by reset(); a refresh that started under an older generation discards its result. */
+  /** Bumped by reset() so a refresh already in flight drops its result. */
   private generation = 0
 
   constructor(
@@ -106,7 +94,6 @@ export class OAuthUsageProvider {
     this.timer = null
   }
 
-  /** The setting was toggled: start over, ignoring any check already in flight. */
   reset(): void {
     this.generation++
     this.inFlight = null
@@ -116,7 +103,7 @@ export class OAuthUsageProvider {
     if (this.running) void this.refresh()
   }
 
-  /** Claude Code is being used right now; refresh soon if we haven't recently. */
+  /** Called while Claude Code is in use. */
   nudge(now = Date.now()): void {
     if (!this.running || this.inFlight || !this.enabled()) return
     if (this.status.state === 'unsupported' || this.status.state === 'error') return // keep the backoff
@@ -171,14 +158,14 @@ export class OAuthUsageProvider {
       next = LOGIN_CHECK_MS
     } else {
       const wait = await this.fetchUsage(token.accessToken, now, generation)
-      if (wait === null) return // reset() ran meanwhile
+      if (wait === null) return
       next = wait
     }
     this.onChange()
     this.schedule(next)
   }
 
-  /** Returns how long to wait before the next attempt, or null when reset() made this check obsolete. */
+  /** Ms until the next attempt, or null if reset() ran meanwhile. */
   private async fetchUsage(accessToken: string, now: number, generation: number): Promise<number | null> {
     let res: Response
     try {

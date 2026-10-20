@@ -1,5 +1,3 @@
-// Renders the dog the way the app does, so a sprite change that breaks a mood fails here
-// instead of crashing the app (main process tray icon, pet window, settings face).
 import { describe, expect, it } from 'vitest'
 import { frameFor, type Reaction } from '../src/shared/sprites/animate.ts'
 import { composeScene, SCENE_H, SCENE_W } from '../src/shared/sprites/compose.ts'

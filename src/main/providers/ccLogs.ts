@@ -1,6 +1,4 @@
-// Claude Code token usage from the local session logs (~/.claude/projects/**/*.jsonl).
-// Only numeric usage fields, timestamps, model ids and message ids are read; message
-// content is never kept or logged.
+// Only usage numbers are read from the session logs, never message content.
 
 import { watch, type FSWatcher } from 'node:fs'
 import { open, readdir, stat } from 'node:fs/promises'
@@ -13,7 +11,7 @@ export interface UsageRecord {
   ts: number
   tokens: number
   costUsd: number
-  /** The model isn't in the price table, so costUsd is a top-tier estimate. */
+  /** Model not in the price table, so costUsd is a top-tier estimate. */
   unpriced?: boolean
 }
 
@@ -22,7 +20,6 @@ const BLOCK_MS = 5 * HOUR
 const KEEP_MS = 40 * 24 * HOUR
 const CHUNK = 8 * 1024 * 1024
 
-/** Parse one JSONL line. Returns null for anything that isn't an assistant message with usage. */
 export function parseUsageLine(line: string): { key: string; record: UsageRecord } | null {
   if (!line.includes('"usage"')) return null
   let o: any
@@ -51,7 +48,7 @@ export function parseUsageLine(line: string): { key: string; record: UsageRecord
     cacheRead: n(u.cache_read_input_tokens)
   }
   const tokens = counts.input + counts.output + counts.cacheWrite5m + counts.cacheWrite1h + counts.cacheRead
-  // Claude Code logs one line per content block of the same response, all with the same usage.
+  // Claude Code logs one line per content block, so de-dupe by message id + request id.
   const key = msg.id ? `${msg.id}:${o.requestId ?? ''}` : String(o.uuid ?? `${ts}:${tokens}`)
   const record: UsageRecord = { ts, tokens, costUsd: estimateCostUsd(model, counts, u.speed === 'fast') }
   if (!isPriced(model)) record.unpriced = true
@@ -64,7 +61,7 @@ export interface Block {
   lastTs: number
 }
 
-/** Group records (sorted by time) into 5-hour session blocks, as Claude Code's limits do. */
+/** 5-hour session blocks, matching Claude Code's limit windows. */
 export function blocksOf(sorted: UsageRecord[]): Block[] {
   const blocks: Block[] = []
   let cur: Block | null = null
@@ -85,7 +82,7 @@ export function activeBlock(sorted: UsageRecord[], now: number): Block | null {
   return last && now < last.end ? last : null
 }
 
-/** Start and end of the budget period that contains `now` (local time). */
+/** Period boundaries are in local time. */
 export function periodRange(
   period: BudgetPeriod,
   sorted: UsageRecord[],
@@ -117,7 +114,6 @@ export function periodRange(
 interface Totals {
   tokens: number
   usd: number
-  /** Tokens from models missing from the price table (priced at top-tier rates). */
   unpriced: number
 }
 
@@ -193,15 +189,9 @@ export function logSnapshot(sorted: UsageRecord[], budget: LogBudget | null, now
   }
 }
 
-/** With a working watcher, a full rescan is only a safety net; without one, it's how changes are found. */
 const FULL_SCAN_MS = 5 * 60_000
 const POLL_MS = 30_000
 
-/**
- * Tails every session log incrementally and keeps the last ~40 days of usage records.
- * Watcher events read just the files that changed; a periodic full scan catches anything the
- * watcher missed and forgets files that were deleted.
- */
 export class LogUsageProvider {
   private files = new Map<string, { size: number; leftover: Buffer }>()
   private seen = new Map<string, number>()
@@ -210,7 +200,6 @@ export class LogUsageProvider {
   private watcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
   private debounce: NodeJS.Timeout | null = null
-  /** Pending work, done one pass at a time by drain(). */
   private wantFull = false
   private dirty = new Set<string>()
   private working: Promise<void> | null = null
@@ -240,7 +229,6 @@ export class LogUsageProvider {
     return logSnapshot(this.sortedRecords(), budget, now)
   }
 
-  /** Exposed for tests. */
   sortedRecords(): UsageRecord[] {
     if (!this.sorted) {
       this.records.sort((a, b) => a.ts - b.ts)
@@ -249,12 +237,12 @@ export class LogUsageProvider {
     return this.records
   }
 
-  /** Exposed for tests: how many log files are being tracked. */
+  /** Exposed for tests. */
   trackedFiles(): number {
     return this.files.size
   }
 
-  /** Full scan. Resolves once a pass that started after this call has finished. */
+  /** Resolves once a pass started after this call has finished. */
   scan(): Promise<void> {
     this.wantFull = true
     return (this.working ?? Promise.resolve()).then(() => this.drain())
@@ -275,7 +263,7 @@ export class LogUsageProvider {
       const before = this.records.length
       if (this.wantFull) {
         this.wantFull = false
-        this.dirty.clear() // a full scan covers them
+        this.dirty.clear()
         await this.fullScan()
       } else {
         const files = [...this.dirty]
@@ -293,7 +281,7 @@ export class LogUsageProvider {
     try {
       names = (await readdir(this.root, { recursive: true })).filter((n) => n.endsWith('.jsonl'))
     } catch {
-      return // No Claude Code logs yet.
+      return // no logs yet
     }
     if (!this.watcher) this.watchRoot()
     const present = new Set(names.map((n) => join(this.root, n)))
@@ -301,7 +289,6 @@ export class LogUsageProvider {
     for (const file of present) await this.readChanged(file)
   }
 
-  /** Read whatever is new in one file; forget it if it's gone. */
   private async readChanged(file: string): Promise<void> {
     let st
     try {
@@ -312,7 +299,7 @@ export class LogUsageProvider {
     }
     const known = this.files.get(file)
     if (!known) {
-      // Old files can't contribute to any budget period; just remember where they end.
+      // Too old for any budget period, so only record where it ends.
       if (st.mtimeMs < Date.now() - KEEP_MS) {
         this.files.set(file, { size: st.size, leftover: Buffer.alloc(0) })
         return
@@ -321,7 +308,7 @@ export class LogUsageProvider {
     } else if (st.size > known.size) {
       await this.readFrom(file, known.size, st.size)
     } else if (st.size < known.size) {
-      // Rewritten: read it again; de-duplication drops what we already have.
+      // Rewritten, so re-read from the start. De-dupe drops known records.
       known.leftover = Buffer.alloc(0)
       await this.readFrom(file, 0, st.size)
     }
@@ -348,13 +335,13 @@ export class LogUsageProvider {
           entry.leftover = Buffer.from(data)
           continue
         }
-        // Split on whole lines only, so multi-byte characters never get cut in half.
+        // Splitting on whole lines keeps multi-byte characters intact.
         for (const line of data.subarray(0, lastNl).toString('utf8').split('\n')) this.ingest(line)
         entry.leftover = Buffer.from(data.subarray(lastNl + 1))
       }
       entry.size = pos
     } catch {
-      // File vanished or is locked; try again next scan.
+      // Vanished or locked, retried on the next scan.
     } finally {
       await fh?.close()
     }
@@ -382,20 +369,18 @@ export class LogUsageProvider {
     try {
       this.watcher = watch(this.root, { recursive: true }, (_event, name) => {
         if (name && !String(name).endsWith('.jsonl')) return
-        // Read just the file that changed; without a name, fall back to a full scan.
         if (name) this.dirty.add(join(this.root, String(name)))
         else this.wantFull = true
         if (this.debounce) clearTimeout(this.debounce)
         this.debounce = setTimeout(() => void this.drain(), 500)
       })
-      // An unhandled 'error' (e.g. EPERM when ~/.claude/projects is deleted) would crash the main
-      // process. Drop the watcher; the 30s scans take over and re-arm it once the folder is back.
+      // An unhandled fs.watch 'error' event crashes the main process.
       this.watcher.on('error', () => {
         this.watcher?.close()
         this.watcher = null
       })
     } catch {
-      // The 30s scans still pick up changes.
+      // Polling still picks up changes.
     }
   }
 }

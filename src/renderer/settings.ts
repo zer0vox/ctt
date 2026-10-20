@@ -12,7 +12,7 @@ const errorBox = $<HTMLParagraphElement>('error')
 
 function showError(e: unknown): void {
   const msg = e instanceof Error ? e.message : String(e)
-  // Electron prefixes errors thrown in ipcMain.handle; keep only the message.
+  // Strip the prefix Electron adds to errors thrown in ipcMain.handle.
   errorBox.textContent = msg.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 }
 
@@ -31,7 +31,6 @@ function numOrNull(input: HTMLInputElement): number | null {
   return Number.isFinite(v) && v > 0 ? v : null
 }
 
-// ── Render ───────────────────────────────────────────────────────────────
 const LIVE_CLASS: Record<SettingsView['live']['state'], string> = {
   off: 'status',
   ok: 'status ok',
@@ -41,14 +40,13 @@ const LIVE_CLASS: Record<SettingsView['live']['state'], string> = {
   error: 'status warn'
 }
 
-/** Everything, including text fields. Used on load and after this window saves. */
+// Includes text fields; only called on load and after this window saves.
 function render(v: SettingsView): void {
   const s = v.settings
   $<HTMLSelectElement>('primary').value = s.primary
   $<HTMLSelectElement>('scale').value = String(s.scale)
 
-  // Unit, period and "as of" are only overwritten when a value is saved, so choosing them
-  // before typing the amount doesn't snap them back to the defaults.
+  // Unit/period/as-of fields are only overwritten when a value is saved.
   const budget = s.logs.budget
   $('logs-amount').value = budget ? String(budget.amount) : ''
   if (budget) {
@@ -62,7 +60,7 @@ function render(v: SettingsView): void {
   renderStatus(v)
 }
 
-/** Checkboxes and status lines only, so background updates never overwrite something being typed. */
+// Skips text fields so background updates never overwrite typing.
 function renderStatus(v: SettingsView): void {
   const s = v.settings
   $('plan-enabled').checked = s.plan.enabled
@@ -80,7 +78,7 @@ function renderStatus(v: SettingsView): void {
   live.className = LIVE_CLASS[v.live.state]
   live.textContent =
     v.live.state === 'ok' && v.live.lastSuccess
-      ? `✓ Live. Last checked ${fmtAgo(v.live.lastSuccess)}.`
+      ? `Live. Last checked ${fmtAgo(v.live.lastSuccess)}.`
       : v.live.state === 'off'
         ? 'Off.'
         : v.live.message
@@ -89,8 +87,8 @@ function renderStatus(v: SettingsView): void {
   if (v.bridge.installed) {
     bridge.className = 'status ok'
     bridge.textContent = v.bridge.lastUpdate
-      ? `✓ Bridge installed. Last update from Claude Code ${fmtAgo(v.bridge.lastUpdate)}.`
-      : '✓ Bridge installed. Start or continue a Claude Code session to send the first reading.'
+      ? `Bridge installed. Last update from Claude Code ${fmtAgo(v.bridge.lastUpdate)}.`
+      : 'Bridge installed. Start or continue a Claude Code session to send the first reading.'
   } else {
     bridge.className = 'status warn'
     bridge.textContent = v.bridge.otherCommand
@@ -106,7 +104,7 @@ function renderStatus(v: SettingsView): void {
     key.textContent = 'Windows encryption is unavailable, so a key cannot be stored safely.'
   } else {
     key.className = v.apiKeySet ? 'status ok' : 'status'
-    key.textContent = v.apiKeySet ? '✓ Admin key saved (encrypted).' : 'No key saved.'
+    key.textContent = v.apiKeySet ? 'Admin key saved (encrypted).' : 'No key saved.'
   }
   $<HTMLButtonElement>('key-save').disabled = !v.encryptionAvailable
   $<HTMLButtonElement>('key-clear').disabled = !v.apiKeySet
@@ -117,7 +115,6 @@ async function save(patch: SettingsPatch): Promise<void> {
   if (v) render(v)
 }
 
-// ── Wire up ──────────────────────────────────────────────────────────────
 const onChange = (id: string, fn: () => void): void => $(id).addEventListener('change', fn)
 
 onChange('primary', () => void save({ primary: $<HTMLSelectElement>('primary').value }))
@@ -178,7 +175,6 @@ $('bridge-remove').addEventListener('click', async () => {
   if (v) render(v)
 })
 
-// Mood preview drives the real pet window.
 const previewOn = $('preview-on')
 const previewJoy = $('preview-joy')
 const previewOut = $<HTMLOutputElement>('preview-out')
@@ -193,7 +189,6 @@ previewOn.addEventListener('change', () => {
 })
 previewJoy.addEventListener('input', sendPreview)
 
-// ── Header face follows the live mood ────────────────────────────────────
 const face = $<HTMLCanvasElement>('face')
 const faceCtx = face.getContext('2d')!
 function drawFace(state: PetState): void {

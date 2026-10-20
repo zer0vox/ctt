@@ -1,5 +1,3 @@
-// Merges provider snapshots into the pet state and tracks mood changes for notifications.
-
 import { joyOf, moodFor, pickPrimary } from '../shared/mood.ts'
 import type { MoodId, PetState, UsageSnapshot } from '../shared/types.ts'
 
@@ -9,7 +7,7 @@ export interface MoodChange {
   state: PetState
 }
 
-/** How much a limit's usage must drop, after its reset time, to count as a reset worth celebrating. */
+// Minimum usage drop past the reset time that counts as a reset.
 const RESET_DROP = 0.25
 
 export class Aggregator {
@@ -36,11 +34,7 @@ export class Aggregator {
     this.update()
   }
 
-  /**
-   * True when a limit really reset: the reset time we knew about has passed and its usage fell.
-   * Compared per source, so switching which source drives the mood, ending a preview or editing
-   * a budget (same reset time) never counts.
-   */
+  // Per source, so a primary switch, preview end or budget edit never counts.
   private sawReset(snapshots: UsageSnapshot[], now: number): boolean {
     let reset = false
     for (const s of snapshots) {
@@ -70,7 +64,7 @@ export class Aggregator {
     }
     const changed = mood !== this.mood
     const from = this.mood
-    // Moving into, during or out of a preview never sends notifications.
+    // No notifications entering, during or leaving a preview.
     const quiet = this.previewed || this.previewJoy !== null
     this.previewed = this.previewJoy !== null
     this.mood = mood

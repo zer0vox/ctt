@@ -1,5 +1,4 @@
-// Renders every mood (a few frames each) to scripts/preview-out/moods.png, and the app icon
-// to build/icon.png. Run with: npm run sprites
+// Renders a sheet of every mood and the app icon. Run with: npm run sprites
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { encodePng } from './png.ts'
 import { frameFor } from '../src/shared/sprites/animate.ts'
@@ -38,7 +37,7 @@ MOODS.forEach((mood, row) => {
 mkdirSync('scripts/preview-out', { recursive: true })
 writeFileSync('scripts/preview-out/moods.png', encodePng(sheet, width, height))
 
-// App icon: the happy dog's head and shoulders, 256x256.
+// App icon, 256x256.
 const icon = sceneToBitmap(composeScene(frameFor('happy', 5, 1)), PALETTE_RGB, 8, PORTRAITS.sit)
 mkdirSync('build', { recursive: true })
 writeFileSync('build/icon.png', encodePng(icon.data, icon.width, icon.height))

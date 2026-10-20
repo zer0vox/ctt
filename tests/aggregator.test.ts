@@ -49,7 +49,7 @@ describe('Aggregator celebrations', () => {
     const a = setup('plan-7d')
     a.set([snap('plan-5h', 0.05, t0 + HOUR), snap('plan-7d', 0.9, t0 + 50 * HOUR)])
     a.agg.update(t0)
-    a.choose('plan-5h') // remaining jumps from 10% to 95% for the mood, but nothing reset
+    a.choose('plan-5h') // 10% left becomes 95% left, but nothing reset
     a.agg.update(t0 + 1000)
     expect(a.celebrations()).toBe(0)
   })

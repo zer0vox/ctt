@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { PetState, PupApi } from '../shared/types.ts'
 
-// A narrow, typed bridge: the renderers never get Node or raw ipcRenderer access.
 const api: PupApi = {
   getState: () => ipcRenderer.invoke('state:get'),
   onState: (cb) => {

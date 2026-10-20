@@ -12,7 +12,7 @@ const hud = document.getElementById('hud')!
 const card = document.getElementById('card')!
 
 let state: PetState = { snapshots: [], primaryId: null, joy: null, mood: 'sniffing', celebrations: 0 }
-/** Celebrations already seen; null until the first state arrives, so opening the pet never celebrates. */
+// Null until the first state arrives, so opening the pet never celebrates.
 let celebrated: number | null = null
 let scale = 4
 let px = 4
@@ -20,10 +20,9 @@ let tick = 0
 let reaction: Reaction | null = null
 let lastScene: Scene | null = null
 
-// ── Drawing ──────────────────────────────────────────────────────────────
 function sizeCanvas(): void {
   const dpr = window.devicePixelRatio || 1
-  // Whole device pixels per art pixel keeps edges crisp at any Windows display scaling.
+  // Whole device pixels per art pixel keep edges crisp at fractional Windows scaling.
   px = Math.max(1, Math.round(scale * dpr))
   canvas.width = SCENE_W * px
   canvas.height = SCENE_H * px
@@ -47,7 +46,6 @@ function draw(): void {
   }
 }
 
-// ── HUD and hover card ───────────────────────────────────────────────────
 function barColor(left: number): string {
   if (left > 0.6) return 'var(--good)'
   if (left > 0.3) return 'var(--ok)'
@@ -103,7 +101,6 @@ function renderCard(): void {
   }
   if (!state.snapshots.length) lines.push(el('div', 'line muted', 'Connect a data source in Settings.'))
   else if (state.joy === null) {
-    // Only info (e.g. token counts) so far: nothing to measure "what's left" against.
     lines.push(el('div', 'line muted', 'No limit to measure against yet.'))
     lines.push(el('div', 'line muted', 'Right-click › Settings: bridge or budget'))
   }
@@ -112,7 +109,6 @@ function renderCard(): void {
 }
 
 function onState(next: PetState): void {
-  // Main counts real limit resets; celebrate each new one.
   if (celebrated !== null && next.celebrations > celebrated) reaction = { kind: 'celebrate', startTick: tick }
   celebrated = next.celebrations
   state = next
@@ -121,7 +117,6 @@ function onState(next: PetState): void {
   draw()
 }
 
-// ── Mouse: pass clicks through transparent pixels, drag, pet, context menu ──
 let interactive = false
 let pointerDown: { x: number; y: number } | null = null
 let dragging = false
@@ -191,7 +186,6 @@ document.addEventListener('contextmenu', (e) => {
   if (overDog(e.clientX, e.clientY) || hud.contains(e.target as Node)) pup.showContextMenu()
 })
 
-// ── Start ────────────────────────────────────────────────────────────────
 async function loadScale(): Promise<void> {
   scale = (await pup.getSettings()).settings.scale
   sizeCanvas()
@@ -200,10 +194,7 @@ async function loadScale(): Promise<void> {
 
 pup.onState(onState)
 pup.onSettingsChanged(() => void loadScale())
-/**
- * Redraw when Windows display scaling changes. A resolution query only fires when the ratio
- * moves away from the value it names, so re-arm it for the new ratio after every change.
- */
+// The resolution query only fires when leaving the ratio it names, so it is re-armed.
 function watchPixelRatio(): void {
   window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener(
     'change',
@@ -226,5 +217,5 @@ setInterval(() => {
   tick++
   draw()
 }, 1000 / FPS)
-// Countdowns in the HUD.
+// Keeps HUD countdowns current between state updates.
 setInterval(renderHud, 30_000)

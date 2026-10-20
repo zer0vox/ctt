@@ -1,5 +1,3 @@
-// Settings must never crash the app: bad values in config.json or IPC patches are ignored, and a
-// save that fails leaves the in-memory settings untouched and reports why.
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,7 +24,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-/** Root ignores file permissions, so a read-only folder can't make a save fail there. */
+// Root ignores file permissions, so a read-only folder can't fail a save.
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0
 
 describe('mergeSettings', () => {
@@ -72,9 +70,7 @@ describe('SettingsStore', () => {
     expect(new SettingsStore(dir).data).toEqual(DEFAULT_SETTINGS)
   })
 
-  // How to make a save fail differs by OS. On Windows a read-only file can't be replaced; on
-  // macOS and Linux renaming over a read-only file works, but a read-only folder blocks the
-  // temp file.
+  // A read-only file fails a save on Windows; macOS and Linux need a read-only folder.
   it.skipIf(process.platform !== 'win32')(
     'reports a failed save and keeps the previous settings (Windows)',
     async () => {
