@@ -75,20 +75,23 @@ try {
   // Never break the user's status line because the state file couldn't be written.
 }
 
-// If another status line command was installed before Token Pup, run it and show its output.
-const chain = readJson(CONFIG_FILE)?.chain?.command
-if (typeof chain === 'string' && chain.trim()) {
-  try {
-    process.stdout.write(execSync(chain, { input: raw, encoding: 'utf8', timeout: 5000, windowsHide: true }))
-    process.exit(0)
-  } catch {
-    // Fall through to our own line.
-  }
-}
-
 function pct(w) {
   if (!w) return '–'
   if (w.resets_at && w.resets_at * 1000 <= now) return '0%'
   return `${Math.round(w.used_percentage)}%`
 }
-process.stdout.write(`🐶 5h ${pct(state.five_hour)} · 7d ${pct(state.seven_day)}`)
+
+// If another status line command was installed before Token Pup, show its output instead.
+let line = null
+const chain = readJson(CONFIG_FILE)?.chain?.command
+if (typeof chain === 'string' && chain.trim()) {
+  try {
+    line = execSync(chain, { input: raw, encoding: 'utf8', timeout: 5000, windowsHide: true })
+  } catch {
+    line = null // Fall back to our own line.
+  }
+}
+// No process.exit(): exiting straight after a write can cut off output going to a pipe.
+// Let the script end on its own once stdout has flushed.
+process.stdout.write(line ?? `🐶 5h ${pct(state.five_hour)} · 7d ${pct(state.seven_day)}`)
+process.exitCode = 0

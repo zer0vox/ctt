@@ -76,7 +76,9 @@ const INNER_LINE: Record<string, string> = {
 }
 
 /** Palette index of the outline drawn over palette index `under` (TRANSPARENT: the plain outline). */
-export const LINE_OVER: ReadonlyArray<number> = PALETTE.map(({ ch }) => (ch in INNER_LINE ? colorIndex(INNER_LINE[ch]) : OUTLINE))
+export const LINE_OVER: ReadonlyArray<number> = PALETTE.map(({ ch }) =>
+  ch in INNER_LINE ? colorIndex(INNER_LINE[ch]) : OUTLINE
+)
 
 /** Palette as [r, g, b] bytes, for bitmap output. */
 export const PALETTE_RGB: ReadonlyArray<[number, number, number]> = PALETTE.map(({ rgb }) =>

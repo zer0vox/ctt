@@ -11,7 +11,9 @@ const ctx = canvas.getContext('2d')!
 const hud = document.getElementById('hud')!
 const card = document.getElementById('card')!
 
-let state: PetState = { snapshots: [], primaryId: null, joy: null, mood: 'sniffing' }
+let state: PetState = { snapshots: [], primaryId: null, joy: null, mood: 'sniffing', celebrations: 0 }
+/** Celebrations already seen; null until the first state arrives, so opening the pet never celebrates. */
+let celebrated: number | null = null
 let scale = 4
 let px = 4
 let tick = 0
@@ -110,10 +112,9 @@ function renderCard(): void {
 }
 
 function onState(next: PetState): void {
-  // A big jump in remaining usage means a limit just reset: celebrate.
-  if (state.joy !== null && next.joy !== null && next.joy - state.joy >= 0.35) {
-    reaction = { kind: 'celebrate', startTick: tick }
-  }
+  // Main counts real limit resets; celebrate each new one.
+  if (celebrated !== null && next.celebrations > celebrated) reaction = { kind: 'celebrate', startTick: tick }
+  celebrated = next.celebrations
   state = next
   renderHud()
   if (card.classList.contains('show')) renderCard()
@@ -199,10 +200,22 @@ async function loadScale(): Promise<void> {
 
 pup.onState(onState)
 pup.onSettingsChanged(() => void loadScale())
-window.matchMedia('(resolution: 1dppx)').addEventListener('change', () => {
-  sizeCanvas()
-  draw()
-})
+/**
+ * Redraw when Windows display scaling changes. A resolution query only fires when the ratio
+ * moves away from the value it names, so re-arm it for the new ratio after every change.
+ */
+function watchPixelRatio(): void {
+  window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener(
+    'change',
+    () => {
+      sizeCanvas()
+      draw()
+      watchPixelRatio()
+    },
+    { once: true }
+  )
+}
+watchPixelRatio()
 window.addEventListener('resize', () => {
   sizeCanvas()
   draw()

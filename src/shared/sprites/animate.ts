@@ -102,7 +102,7 @@ export function frameFor(mood: MoodId, tick: number, bowl: number, reaction?: Re
       f.tail = 'flat'
       // A heavy sigh now and then.
       f.headDy = tick % 60 >= 52 ? 1 : 0
-      if (tick % 40 >= 20) f.overlays.push({ kind: 'tear', x: 25, y: 48 + Math.floor((tick % 40 - 20) / 5) })
+      if (tick % 40 >= 20) f.overlays.push({ kind: 'tear', x: 25, y: 48 + Math.floor(((tick % 40) - 20) / 5) })
       break
     case 'exhausted':
       f.pose = 'lie'

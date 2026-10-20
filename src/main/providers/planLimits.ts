@@ -94,10 +94,35 @@ export function planSnapshots(state: PlanState | null, now: number): UsageSnapsh
   return out
 }
 
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+function bridgeWindow(w: unknown): PlanWindow | null {
+  const win = w as { used_percentage?: unknown; resets_at?: unknown } | null
+  const used = num(win?.used_percentage)
+  return used === null ? null : { used_percentage: used, resets_at: num(win?.resets_at) }
+}
+
+/** The bridge's plan-state.json, field by field: anything malformed is dropped, not trusted. */
+export function parseBridgeState(parsed: unknown): PlanState | null {
+  const o = parsed as Record<string, unknown> | null
+  if (!o || typeof o !== 'object') return null
+  const updatedAt = num(o.updatedAt)
+  if (updatedAt === null) return null
+  return {
+    updatedAt,
+    rateLimitsSeenAt: num(o.rateLimitsSeenAt),
+    five_hour: bridgeWindow(o.five_hour),
+    seven_day: bridgeWindow(o.seven_day),
+    session_cost_usd: num(o.session_cost_usd),
+    context_used_percentage: num(o.context_used_percentage),
+    model: typeof o.model === 'string' ? o.model : null,
+    source: 'bridge'
+  }
+}
+
 export function readPlanState(file: string): PlanState | null {
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'))
-    return parsed && typeof parsed === 'object' ? { ...(parsed as PlanState), source: 'bridge' } : null
+    return parseBridgeState(JSON.parse(readFileSync(file, 'utf8')))
   } catch {
     return null
   }
@@ -105,7 +130,7 @@ export function readPlanState(file: string): PlanState | null {
 
 function usageWindow(w: unknown): PlanWindow | null {
   const win = w as { utilization?: unknown; percent?: unknown; resets_at?: unknown } | null
-  const pct = typeof win?.utilization === 'number' ? win.utilization : typeof win?.percent === 'number' ? win.percent : null
+  const pct = num(win?.utilization) ?? num(win?.percent)
   if (pct === null) return null
   const resets = typeof win?.resets_at === 'string' ? Date.parse(win.resets_at) : NaN
   return { used_percentage: pct, resets_at: Number.isNaN(resets) ? null : Math.floor(resets / 1000) }

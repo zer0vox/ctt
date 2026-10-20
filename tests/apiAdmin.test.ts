@@ -1,17 +1,27 @@
-import { describe, expect, it } from 'vitest'
-import { apiSnapshot, fetchDailyCost, fetchTokens, type ApiData } from '../src/main/providers/apiAdmin.ts'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  apiSnapshot,
+  ApiUsageProvider,
+  fetchDailyCost,
+  fetchTokens,
+  type ApiData
+} from '../src/main/providers/apiAdmin.ts'
 
 function mockFetch(pages: Record<string, unknown[]>): { fetch: typeof fetch; calls: string[] } {
   const calls: string[] = []
   const impl = (async (url: string, init?: RequestInit) => {
     calls.push(url)
-    expect((init?.headers as Record<string, string>)['x-api-key']).toBe('sk-ant-admin01-test')
+    expect(new Headers(init?.headers).get('x-api-key')).toBe('sk-ant-admin01-test')
     const u = new URL(url)
     const path = u.pathname.split('/organizations/')[1]
     const list = pages[path] ?? []
     const page = Number(u.searchParams.get('page') ?? 0)
     return new Response(
-      JSON.stringify({ data: list[page], has_more: page + 1 < list.length, next_page: page + 1 < list.length ? String(page + 1) : null }),
+      JSON.stringify({
+        data: list[page],
+        has_more: page + 1 < list.length,
+        next_page: page + 1 < list.length ? String(page + 1) : null
+      }),
       { status: 200 }
     )
   }) as typeof fetch
@@ -22,7 +32,15 @@ describe('fetchDailyCost', () => {
   it('converts cents to dollars and follows pagination', async () => {
     const { fetch, calls } = mockFetch({
       cost_report: [
-        [{ starting_at: '2026-10-01T00:00:00Z', results: [{ currency: 'USD', amount: '1234.5' }, { currency: 'USD', amount: '100' }] }],
+        [
+          {
+            starting_at: '2026-10-01T00:00:00Z',
+            results: [
+              { currency: 'USD', amount: '1234.5' },
+              { currency: 'USD', amount: '100' }
+            ]
+          }
+        ],
         [{ starting_at: '2026-10-02T00:00:00Z', results: [{ currency: 'USD', amount: '50' }] }]
       ]
     })
@@ -90,7 +108,12 @@ describe('apiSnapshot', () => {
   })
 
   it('estimates a balance from spend since the balance date', () => {
-    const s = apiSnapshot(data, null, { ...cfg, monthlyBudgetUsd: 100, balance: { amountUsd: 40, asOf: '2026-10-10' } }, now)!
+    const s = apiSnapshot(
+      data,
+      null,
+      { ...cfg, monthlyBudgetUsd: 100, balance: { amountUsd: 40, asOf: '2026-10-10' } },
+      now
+    )!
     expect(s.usedFraction).toBeCloseTo(15 / 40)
     expect(s.summary).toBe('$25.00 left')
   })
@@ -99,5 +122,57 @@ describe('apiSnapshot', () => {
     const s = apiSnapshot(null, 'Admin API cost_report: HTTP 401', cfg, now)!
     expect(s.summary).toBe('error')
     expect(s.usedFraction).toBeNull()
+  })
+})
+
+describe('ApiUsageProvider', () => {
+  const cfg = () => ({ enabled: true, monthlyBudgetUsd: 100, balance: null })
+
+  /** A fetch that never answers, but honours its abort signal like the real one. */
+  const hang = ((_url: string, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))
+    })) as typeof fetch
+
+  it('gives up on a request that hangs instead of stalling for good', async () => {
+    const p = new ApiUsageProvider(
+      () => 'sk-ant-admin01-test',
+      cfg,
+      () => {},
+      hang,
+      50
+    )
+    await p.refresh()
+    expect(p.snapshot()?.details.join(' ')).toMatch(/timed out/)
+  })
+
+  it('ignores a refresh that was still running when the key changed', async () => {
+    const held: Array<() => void> = []
+    // The old key's requests hang until released and then report $90 spent; the new key's answer at once with $0.
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      const key = new Headers(init?.headers).get('x-api-key') ?? ''
+      if (key.endsWith('old')) await new Promise<void>((r) => held.push(r))
+      const cents = key.endsWith('old') && url.includes('cost_report') ? '9000' : '0'
+      const data = [{ starting_at: new Date().toISOString(), results: [{ currency: 'USD', amount: cents }] }]
+      return new Response(JSON.stringify({ data, has_more: false }), { status: 200 })
+    }) as typeof fetch
+    let key = 'sk-ant-admin01-old'
+    const p = new ApiUsageProvider(
+      () => key,
+      cfg,
+      () => {},
+      fetchImpl
+    )
+    const old = p.refresh()
+    await vi.waitFor(() => expect(held).toHaveLength(2))
+    key = 'sk-ant-admin01-new'
+    p.reset()
+    await p.refresh()
+    expect(p.snapshot()?.usedFraction).toBe(0)
+    for (const release of held) release()
+    await old
+    // The old key's late $90 answer must not replace the new key's data.
+    expect(p.snapshot()?.usedFraction).toBe(0)
+    p.stop()
   })
 })

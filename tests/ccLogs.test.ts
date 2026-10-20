@@ -1,11 +1,25 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { blocksOf, LogUsageProvider, logSnapshot, parseUsageLine, type UsageRecord } from '../src/main/providers/ccLogs.ts'
+import {
+  blocksOf,
+  LogUsageProvider,
+  logSnapshot,
+  parseUsageLine,
+  type UsageRecord
+} from '../src/main/providers/ccLogs.ts'
 import { estimateCostUsd } from '../src/main/providers/pricing.ts'
 
-function line(opts: { id: string; req?: string; ts: string; input?: number; output?: number; model?: string; text?: string }): string {
+function line(opts: {
+  id: string
+  req?: string
+  ts: string
+  input?: number
+  output?: number
+  model?: string
+  text?: string
+}): string {
   return JSON.stringify({
     type: 'assistant',
     requestId: opts.req ?? `req_${opts.id}`,
@@ -35,7 +49,13 @@ describe('parseUsageLine', () => {
   })
 
   it('prices with the 1-hour cache write rate', () => {
-    const usd = estimateCostUsd('claude-opus-5-5', { input: 100, output: 50, cacheWrite5m: 0, cacheWrite1h: 1000, cacheRead: 2000 })
+    const usd = estimateCostUsd('claude-opus-5-5', {
+      input: 100,
+      output: 50,
+      cacheWrite5m: 0,
+      cacheWrite1h: 1000,
+      cacheRead: 2000
+    })
     expect(usd).toBeCloseTo((100 * 4 + 50 * 20 + 1000 * 8 + 2000 * 0.2) / 1e6)
     expect(parseUsageLine(line({ id: 'm', ts: '2026-10-17T10:00:00Z' }))!.record.costUsd).toBeCloseTo(usd)
   })
@@ -112,5 +132,39 @@ describe('LogUsageProvider', () => {
     expect(p.sortedRecords()).toHaveLength(2)
     expect(changes).toBe(2)
     p.stop()
+  })
+})
+
+describe('unrecognised models', () => {
+  it('are priced at top-tier rates, not $0, and say so', () => {
+    const parsed = parseUsageLine(line({ id: 'msg_new', ts: new Date().toISOString(), model: 'claude-nova-9' }))!
+    expect(parsed.record.unpriced).toBe(true)
+    expect(parsed.record.costUsd).toBeGreaterThan(0)
+    const s = logSnapshot([parsed.record], { metric: 'usd', period: 'day', amount: 100 }, Date.now())!
+    expect(s.details.join(' ')).toMatch(/unrecognised models/)
+  })
+
+  it('leave known models alone', () => {
+    expect(parseUsageLine(line({ id: 'm', ts: new Date().toISOString() }))!.record.unpriced).toBeUndefined()
+  })
+})
+
+describe('LogUsageProvider housekeeping', () => {
+  it('forgets log files that were deleted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pup-prune-'))
+    try {
+      const ts = new Date().toISOString()
+      writeFileSync(join(dir, 'a.jsonl'), line({ id: 'a', ts }) + '\n')
+      writeFileSync(join(dir, 'b.jsonl'), line({ id: 'b', ts }) + '\n')
+      const p = new LogUsageProvider(dir, () => {})
+      await p.scan()
+      expect(p.trackedFiles()).toBe(2)
+      unlinkSync(join(dir, 'b.jsonl'))
+      await p.scan()
+      expect(p.trackedFiles()).toBe(1)
+      p.stop()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

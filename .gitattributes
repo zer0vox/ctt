@@ -1,0 +1,4 @@
+# Keep LF everywhere, including Windows checkouts, so Prettier's check agrees on every OS.
+* text=auto eol=lf
+*.png binary
+*.ico binary

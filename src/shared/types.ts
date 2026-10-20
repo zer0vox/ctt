@@ -35,6 +35,8 @@ export interface PetState {
   mood: MoodId
   /** Reset time of the primary snapshot, if known. */
   resetsAt?: number
+  /** How many real limit resets main has seen; the pet celebrates when it goes up. */
+  celebrations: number
 }
 
 export type BudgetMetric = 'usd' | 'tokens'

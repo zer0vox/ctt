@@ -1,6 +1,6 @@
 // Settings must never crash the app: bad values in config.json or IPC patches are ignored, and a
 // save that fails leaves the in-memory settings untouched and reports why.
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,13 +13,21 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'pup-safety-'))
 })
 afterEach(() => {
-  try {
-    chmodSync(join(dir, 'config.json'), 0o666)
-  } catch {
-    // No config written.
+  for (const [target, mode] of [
+    [dir, 0o755],
+    [join(dir, 'config.json'), 0o666]
+  ] as const) {
+    try {
+      chmodSync(target, mode)
+    } catch {
+      // Not created by this test.
+    }
   }
   rmSync(dir, { recursive: true, force: true })
 })
+
+/** Root ignores file permissions, so a read-only folder can't make a save fail there. */
+const isRoot = typeof process.getuid === 'function' && process.getuid() === 0
 
 describe('mergeSettings', () => {
   it('drops wrongly typed values from a hand-edited config', () => {
@@ -64,12 +72,38 @@ describe('SettingsStore', () => {
     expect(new SettingsStore(dir).data).toEqual(DEFAULT_SETTINGS)
   })
 
-  it('reports a failed save and keeps the previous settings', () => {
+  // How to make a save fail differs by OS. On Windows a read-only file can't be replaced; on
+  // macOS and Linux renaming over a read-only file works, but a read-only folder blocks the
+  // temp file.
+  it.skipIf(process.platform !== 'win32')(
+    'reports a failed save and keeps the previous settings (Windows)',
+    async () => {
+      const store = new SettingsStore(dir)
+      await store.update({ notifications: true })
+      chmodSync(join(dir, 'config.json'), 0o444)
+      await expect(store.update({ notifications: false })).rejects.toThrow(/Couldn't save settings/)
+      expect(store.data.notifications).toBe(true)
+      expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).notifications).toBe(true)
+      expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([])
+    }
+  )
+
+  it.skipIf(process.platform === 'win32' || isRoot)(
+    'reports a failed save and keeps the previous settings (macOS, Linux)',
+    async () => {
+      const store = new SettingsStore(dir)
+      await store.update({ notifications: true })
+      chmodSync(dir, 0o555)
+      await expect(store.update({ notifications: false })).rejects.toThrow(/Couldn't save settings/)
+      expect(store.data.notifications).toBe(true)
+      expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).notifications).toBe(true)
+    }
+  )
+
+  it('applies saves in order when they overlap', async () => {
     const store = new SettingsStore(dir)
-    store.update({ notifications: true })
-    chmodSync(join(dir, 'config.json'), 0o444) // read-only, like a locked file on Windows
-    expect(() => store.update({ notifications: false })).toThrow(/Couldn't save settings/)
-    expect(store.data.notifications).toBe(true)
-    expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).notifications).toBe(true)
+    await Promise.all([store.update({ scale: 4 }), store.update({ notifications: false }), store.update({ scale: 5 })])
+    expect(store.data).toMatchObject({ scale: 5, notifications: false })
+    expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'))).toMatchObject({ scale: 5, notifications: false })
   })
 })

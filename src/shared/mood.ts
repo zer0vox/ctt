@@ -46,14 +46,18 @@ export function moodFor(joy: number | null, prev?: MoodId | null): MoodId {
  * The snapshot that drives the mood: the chosen one if it has data, otherwise the one
  * with the least remaining. Info-only snapshots (no limit) never drive the mood.
  */
-export function pickPrimary(snapshots: UsageSnapshot[], primary: string): UsageSnapshot | null {
+export function pickPrimary(snapshots: UsageSnapshot[], primary: string, now = Date.now()): UsageSnapshot | null {
   const limited = snapshots.filter((s) => s.usedFraction !== null)
   if (primary !== 'auto') {
     const chosen = limited.find((s) => s.id === primary)
     if (chosen) return chosen
   }
+  // Usage only climbs until a limit resets, so a stale reading whose reset is still ahead is a
+  // safe lower bound and keeps counting. A stale one that may have reset since (reset time
+  // passed or unknown) only counts when nothing better is left.
+  const trusted = limited.filter((s) => !s.stale || (s.resetsAt !== undefined && s.resetsAt > now))
   let worst: UsageSnapshot | null = null
-  for (const s of limited) if (!worst || s.usedFraction! > worst.usedFraction!) worst = s
+  for (const s of trusted.length ? trusted : limited) if (!worst || s.usedFraction! > worst.usedFraction!) worst = s
   return worst
 }
 

@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { OAuthUsageProvider, readClaudeToken, tokenFromCredentials, type OAuthToken } from '../src/main/providers/oauthUsage.ts'
+import {
+  OAuthUsageProvider,
+  readClaudeToken,
+  tokenFromCredentials,
+  type OAuthToken
+} from '../src/main/providers/oauthUsage.ts'
 import { planStateFromUsage } from '../src/main/providers/planLimits.ts'
 
 const FAKE = 'sk-ant-oat01-FAKE-TOKEN-FOR-TESTS'
@@ -26,17 +31,28 @@ function setup(opts: { token?: OAuthToken | null; responses?: Array<() => Respon
   let enabled = opts.enabled ?? true
   const onChange = vi.fn()
   const token = opts.token === undefined ? { accessToken: FAKE, expiresAt: future() } : opts.token
-  const p = new OAuthUsageProvider('unused', () => enabled, onChange, fetchImpl, async () => token)
+  const p = new OAuthUsageProvider(
+    'unused',
+    () => enabled,
+    onChange,
+    fetchImpl,
+    async () => token
+  )
   return { p, calls, onChange, setEnabled: (v: boolean) => (enabled = v) }
 }
 
-const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => () =>
-  new Response(JSON.stringify(body), { status, headers })
+const json =
+  (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  () =>
+    new Response(JSON.stringify(body), { status, headers })
 
 describe('tokenFromCredentials', () => {
   it('reads the Claude login and ignores everything else', () => {
     expect(
-      tokenFromCredentials({ mcpOAuth: { x: { accessToken: 'mcp' } }, claudeAiOauth: { accessToken: FAKE, expiresAt: 5 } })
+      tokenFromCredentials({
+        mcpOAuth: { x: { accessToken: 'mcp' } },
+        claudeAiOauth: { accessToken: FAKE, expiresAt: 5 }
+      })
     ).toEqual({ accessToken: FAKE, expiresAt: 5 })
     expect(tokenFromCredentials({ mcpOAuth: { x: { accessToken: 'mcp' } } })).toBeNull()
     expect(tokenFromCredentials(null)).toBeNull()
@@ -46,7 +62,10 @@ describe('tokenFromCredentials', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pup-creds-'))
     try {
       expect(await readClaudeToken(dir, 'win32')).toBeNull()
-      writeFileSync(join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: FAKE, expiresAt: 1 } }))
+      writeFileSync(
+        join(dir, '.credentials.json'),
+        JSON.stringify({ claudeAiOauth: { accessToken: FAKE, expiresAt: 1 } })
+      )
       expect(await readClaudeToken(dir, 'linux')).toEqual({ accessToken: FAKE, expiresAt: 1 })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -134,7 +153,13 @@ describe('OAuthUsageProvider', () => {
   })
 
   it('never puts the token in status messages', async () => {
-    for (const r of [json({}, 401), json({}, 404), json({}, 429, { 'retry-after': '30' }), json({}, 500), () => new Response('x')]) {
+    for (const r of [
+      json({}, 401),
+      json({}, 404),
+      json({}, 429, { 'retry-after': '30' }),
+      json({}, 500),
+      () => new Response('x')
+    ]) {
       const { p } = setup({ responses: [r] })
       await p.refresh()
       expect(JSON.stringify(p.liveStatus())).not.toContain(FAKE)
@@ -150,6 +175,36 @@ describe('OAuthUsageProvider', () => {
     expect(calls).toHaveLength(1)
     p.nudge(Date.now() + 91_000)
     await vi.waitFor(() => expect(calls).toHaveLength(2))
+    p.stop()
+  })
+})
+
+describe('OAuthUsageProvider reset', () => {
+  it('does not let a check that was in flight bring data back after live updates are switched off', async () => {
+    let enabled = true
+    const held: Array<() => void> = []
+    const fetchImpl = (async () => new Response(JSON.stringify(usageBody), { status: 200 })) as typeof fetch
+    const readToken = async () => {
+      await new Promise<void>((r) => held.push(r))
+      return { accessToken: FAKE, expiresAt: future() }
+    }
+    const p = new OAuthUsageProvider(
+      'unused',
+      () => enabled,
+      () => {},
+      fetchImpl,
+      readToken
+    )
+    p.start() // the first check waits on the token
+    await vi.waitFor(() => expect(held).toHaveLength(1))
+    enabled = false
+    p.reset() // the app does this when the setting changes
+    await p.refresh()
+    expect(p.liveStatus().state).toBe('off')
+    held[0]() // the old check finally gets its token
+    await new Promise((r) => setTimeout(r, 20))
+    enabled = true // only so state() would show data if any had been stored
+    expect(p.state()).toBeNull()
     p.stop()
   })
 })

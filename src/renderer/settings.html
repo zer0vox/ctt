@@ -43,18 +43,17 @@
         >
         <div class="status" id="live-status"></div>
         <p class="hint small">
-          Uses the Claude login that Claude Code saved on this computer to make the same read-only request Claude
-          Code makes for <code>/usage</code>. Works with the VS Code panel, the terminal, JetBrains and the desktop
-          app, and includes claude.ai usage. Your login is only sent to api.anthropic.com and is never stored by
-          Token Pup. Unofficial: it could stop working if Anthropic changes it.
+          Uses the Claude login that Claude Code saved on this computer to make the same read-only request Claude Code
+          makes for <code>/usage</code>. Works with the VS Code panel, the terminal, JetBrains and the desktop app, and
+          includes claude.ai usage. Your login is only sent to api.anthropic.com and is never stored by Token Pup.
+          Unofficial: it could stop working if Anthropic changes it.
         </p>
 
         <h3>Without live updates</h3>
         <p class="hint small">
           Token Pup also reads the copy of your usage that Claude Code keeps, which refreshes only when Claude Code
-          checks usage (for example <code>/usage</code>). If you run <code>claude</code> in a terminal on a Pro or
-          Max plan, the status line bridge updates after every reply and shows
-          <code>🐶 5h 42% · 7d 18%</code>.
+          checks usage (for example <code>/usage</code>). If you run <code>claude</code> in a terminal on a Pro or Max
+          plan, the status line bridge updates after every reply and shows <code>🐶 5h 42% · 7d 18%</code>.
         </p>
         <div class="status" id="bridge-status"></div>
         <div class="actions">
@@ -72,7 +71,9 @@
         <label class="check"
           ><input type="checkbox" id="logs-enabled" /> Read token usage from local Claude Code logs</label
         >
-        <p class="hint">Only token counts and timestamps are read, never your prompts. Costs are estimates at API list prices.</p>
+        <p class="hint">
+          Only token counts and timestamps are read, never your prompts. Costs are estimates at API list prices.
+        </p>
         <div class="grid3">
           <label class="field">
             <span>Budget</span>
@@ -125,8 +126,8 @@
           </label>
         </div>
         <p class="hint small">
-          The API has no balance endpoint. Enter the balance from Console › Billing and the date you read it; Token
-          Pup subtracts spend since then. A balance takes priority over a monthly budget.
+          The API has no balance endpoint. Enter the balance from Console › Billing and the date you read it; Token Pup
+          subtracts spend since then. A balance takes priority over a monthly budget.
         </p>
       </section>
 

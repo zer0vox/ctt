@@ -1,7 +1,9 @@
 import { safeStorage } from 'electron'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ApiBalance, BudgetMetric, BudgetPeriod, LogBudget, Settings, SettingsPatch } from '../shared/types.ts'
+import { writeFileAtomic } from './fsAtomic.ts'
 
 export const DEFAULT_SETTINGS: Settings = {
   primary: 'auto',
@@ -39,7 +41,12 @@ function pick<T>(v: unknown, ok: (v: unknown) => v is T, fallback: T): T {
 }
 
 /** `null` clears, a valid value replaces, a missing or invalid one keeps `fallback`. */
-function nullable<T>(source: Record<string, unknown>, key: string, parse: (v: unknown) => T | undefined, fallback: T | null): T | null {
+function nullable<T>(
+  source: Record<string, unknown>,
+  key: string,
+  parse: (v: unknown) => T | undefined,
+  fallback: T | null
+): T | null {
   if (!(key in source)) return fallback
   const v = source[key]
   if (v === null) return null
@@ -96,42 +103,13 @@ export function mergeSettings(base: Settings, raw: unknown): Settings {
   }
 }
 
-// ── Saving ───────────────────────────────────────────────────────────────
-
-/** Windows reports these while antivirus or the search indexer briefly holds a file open. */
-const TRANSIENT = new Set(['EPERM', 'EBUSY', 'EACCES'])
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-}
-
-function writeAtomic(file: string, data: string | Buffer): void {
-  const tmp = `${file}.tmp`
-  writeFileSync(tmp, data)
-  for (let attempt = 0; ; attempt++) {
-    try {
-      renameSync(tmp, file)
-      return
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      if (!code || !TRANSIENT.has(code)) throw e
-      if (attempt < 3) {
-        sleepSync(25 * (attempt + 1))
-        continue
-      }
-      // Still locked: write in place (not atomic, but better than losing the change).
-      writeFileSync(file, data)
-      rmSync(tmp, { force: true })
-      return
-    }
-  }
-}
-
 /** Settings in config.json; the Admin API key encrypted with the OS keystore (DPAPI on Windows) in api-key.bin. */
 export class SettingsStore {
   private readonly file: string
   private readonly keyFile: string
   private cachedKey: string | null | undefined
+  /** Saves run one at a time, each on top of the last, so quick successive changes can't race. */
+  private queue: Promise<unknown> = Promise.resolve()
   /** True when there was no config file yet (first launch). */
   readonly firstRun: boolean
   data: Settings
@@ -158,16 +136,23 @@ export class SettingsStore {
    * Validate, save, then apply. If the save fails the in-memory settings stay as they were (so
    * nothing claims a change that won't survive a restart) and the error says why.
    */
-  update(patch: SettingsPatch): Settings {
-    const next = mergeSettings(this.data, patch)
-    try {
-      writeAtomic(this.file, JSON.stringify({ ...next, sizeVersion: SIZE_VERSION }, null, 2))
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code
-      throw new Error(`Couldn't save settings to ${this.file}${code ? ` (${code})` : ''}. Is the file read-only or locked?`)
+  update(patch: SettingsPatch): Promise<Settings> {
+    const run = async (): Promise<Settings> => {
+      const next = mergeSettings(this.data, patch)
+      try {
+        await writeFileAtomic(this.file, JSON.stringify({ ...next, sizeVersion: SIZE_VERSION }, null, 2))
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        throw new Error(
+          `Couldn't save settings to ${this.file}${code ? ` (${code})` : ''}. Is the file read-only or locked?`
+        )
+      }
+      this.data = next
+      return next
     }
-    this.data = next
-    return this.data
+    const result = this.queue.then(run, run)
+    this.queue = result.catch(() => {})
+    return result
   }
 
   encryptionAvailable(): boolean {
@@ -191,13 +176,13 @@ export class SettingsStore {
     return this.cachedKey
   }
 
-  setApiKey(key: string | null): void {
+  async setApiKey(key: string | null): Promise<void> {
     this.cachedKey = undefined
     if (!key) {
-      rmSync(this.keyFile, { force: true })
+      await rm(this.keyFile, { force: true })
       return
     }
     if (!safeStorage.isEncryptionAvailable()) throw new Error('OS encryption is unavailable; the key was not saved')
-    writeAtomic(this.keyFile, safeStorage.encryptString(key.trim()))
+    await writeFileAtomic(this.keyFile, safeStorage.encryptString(key.trim()))
   }
 }

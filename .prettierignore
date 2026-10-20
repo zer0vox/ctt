@@ -1,0 +1,9 @@
+# Build output and dependencies
+out/
+dist/
+node_modules/
+package-lock.json
+scripts/preview-out/
+
+# Pixel grids: one row of the sprite per line, which Prettier would reflow.
+src/shared/sprites/parts.ts

@@ -8,6 +8,8 @@ import type { ApiBalance, Settings, UsageSnapshot } from '../../shared/types.ts'
 const BASE = 'https://api.anthropic.com/v1/organizations'
 const POLL_MS = 5 * 60_000
 const MAX_BACKOFF_MS = 60 * 60_000
+/** A request that hangs longer than this is abandoned, so one stuck call can't stop polling. */
+const REQUEST_TIMEOUT_MS = 20_000
 
 type Fetch = typeof fetch
 
@@ -17,15 +19,28 @@ export interface DayCost {
   usd: number
 }
 
-async function getAll(fetchImpl: Fetch, key: string, path: string, params: Record<string, string>): Promise<any[]> {
+async function getAll(
+  fetchImpl: Fetch,
+  key: string,
+  path: string,
+  params: Record<string, string>,
+  timeoutMs = REQUEST_TIMEOUT_MS
+): Promise<any[]> {
   const data: any[] = []
   let page: string | null = null
   for (let i = 0; i < 20; i++) {
     const qs = new URLSearchParams(params)
     if (page) qs.set('page', page)
-    const res = await fetchImpl(`${BASE}/${path}?${qs}`, {
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
-    })
+    let res: Response
+    try {
+      res = await fetchImpl(`${BASE}/${path}?${qs}`, {
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        signal: AbortSignal.timeout(timeoutMs)
+      })
+    } catch (e) {
+      const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')
+      throw new Error(`Admin API ${path}: ${timedOut ? 'timed out' : 'could not reach api.anthropic.com'}`)
+    }
     if (!res.ok) {
       // Never include the key or headers in the error.
       const hint = res.status === 401 || res.status === 403 ? ' (check the Admin key)' : ''
@@ -40,8 +55,19 @@ async function getAll(fetchImpl: Fetch, key: string, path: string, params: Recor
 }
 
 /** Daily cost in USD. The API reports amounts as decimal strings in cents. */
-export async function fetchDailyCost(fetchImpl: Fetch, key: string, startingAt: string): Promise<DayCost[]> {
-  const buckets = await getAll(fetchImpl, key, 'cost_report', { starting_at: startingAt, bucket_width: '1d', limit: '31' })
+export async function fetchDailyCost(
+  fetchImpl: Fetch,
+  key: string,
+  startingAt: string,
+  timeoutMs?: number
+): Promise<DayCost[]> {
+  const buckets = await getAll(
+    fetchImpl,
+    key,
+    'cost_report',
+    { starting_at: startingAt, bucket_width: '1d', limit: '31' },
+    timeoutMs
+  )
   return buckets.map((b) => ({
     day: String(b.starting_at).slice(0, 10),
     usd: (b.results ?? [])
@@ -51,12 +77,19 @@ export async function fetchDailyCost(fetchImpl: Fetch, key: string, startingAt: 
 }
 
 /** Total tokens (input, cache and output) since `startingAt`. */
-export async function fetchTokens(fetchImpl: Fetch, key: string, startingAt: string): Promise<number> {
-  const buckets = await getAll(fetchImpl, key, 'usage_report/messages', {
-    starting_at: startingAt,
-    bucket_width: '1d',
-    limit: '31'
-  })
+export async function fetchTokens(
+  fetchImpl: Fetch,
+  key: string,
+  startingAt: string,
+  timeoutMs?: number
+): Promise<number> {
+  const buckets = await getAll(
+    fetchImpl,
+    key,
+    'usage_report/messages',
+    { starting_at: startingAt, bucket_width: '1d', limit: '31' },
+    timeoutMs
+  )
   let total = 0
   for (const b of buckets) {
     for (const r of b.results ?? []) {
@@ -111,7 +144,10 @@ export function apiSnapshot(
       stale,
       updatedAt: data.fetchedAt,
       summary: `${fmtUsd(left)} left`,
-      details: [`Estimated balance: ${fmtUsd(left)} of ${fmtUsd(balance.amountUsd)} (since ${balance.asOf})`, ...details]
+      details: [
+        `Estimated balance: ${fmtUsd(left)} of ${fmtUsd(balance.amountUsd)} (since ${balance.asOf})`,
+        ...details
+      ]
     }
   }
   if (cfg.monthlyBudgetUsd && cfg.monthlyBudgetUsd > 0) {
@@ -148,12 +184,16 @@ export class ApiUsageProvider {
   private timer: NodeJS.Timeout | null = null
   private delay = POLL_MS
   private running = false
+  private inFlight: Promise<void> | null = null
+  /** Bumped by reset(); a refresh that started under an older generation discards its result. */
+  private generation = 0
 
   constructor(
     private readonly getKey: () => string | null,
     private readonly getConfig: () => Settings['api'],
     private readonly onChange: () => void,
-    private readonly fetchImpl: Fetch = fetch
+    private readonly fetchImpl: Fetch = fetch,
+    private readonly timeoutMs = REQUEST_TIMEOUT_MS
   ) {}
 
   start(): void {
@@ -167,12 +207,15 @@ export class ApiUsageProvider {
     this.timer = null
   }
 
-  /** Forget cached data (e.g. the key changed) and fetch again. */
+  /** Forget cached data (e.g. the key changed) and fetch again. A refresh already in flight is ignored. */
   reset(): void {
+    this.generation++
+    this.inFlight = null
     this.data = null
     this.error = null
     this.delay = POLL_MS
     if (this.timer) clearTimeout(this.timer)
+    this.timer = null
     if (this.running) void this.refresh()
     else this.onChange()
   }
@@ -182,7 +225,17 @@ export class ApiUsageProvider {
     return apiSnapshot(this.data, this.error, this.getConfig(), now)
   }
 
-  async refresh(): Promise<void> {
+  /** One refresh at a time; calls during a refresh share it. */
+  refresh(): Promise<void> {
+    if (this.inFlight) return this.inFlight
+    const run: Promise<void> = this.doRefresh(this.generation).finally(() => {
+      if (this.inFlight === run) this.inFlight = null
+    })
+    this.inFlight = run
+    return run
+  }
+
+  private async doRefresh(generation: number): Promise<void> {
     if (this.timer) clearTimeout(this.timer)
     const key = this.getKey()
     if (!key) {
@@ -195,13 +248,15 @@ export class ApiUsageProvider {
       const asOf = this.getConfig().balance?.asOf
       const from = asOf && asOf < monthStart.toISOString().slice(0, 10) ? `${asOf}T00:00:00Z` : monthStart.toISOString()
       const [days, monthTokens] = await Promise.all([
-        fetchDailyCost(this.fetchImpl, key, from),
-        fetchTokens(this.fetchImpl, key, monthStart.toISOString())
+        fetchDailyCost(this.fetchImpl, key, from, this.timeoutMs),
+        fetchTokens(this.fetchImpl, key, monthStart.toISOString(), this.timeoutMs)
       ])
+      if (generation !== this.generation) return // reset() ran meanwhile; its refresh owns the data
       this.data = { days, monthTokens, fetchedAt: now }
       this.error = null
       this.delay = POLL_MS
     } catch (e) {
+      if (generation !== this.generation) return
       this.error = e instanceof Error ? e.message : 'Request failed'
       this.delay = Math.min(this.delay * 2, MAX_BACKOFF_MS)
     }

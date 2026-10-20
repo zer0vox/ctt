@@ -2,25 +2,25 @@
 
 A pixel-art German Shepherd for your Windows desktop (sitting side-on by its bowl, face turned to you) whose mood tracks how much Claude usage you have left. A full bowl means a happy pup; an empty bowl means a sleepy one.
 
-| Remaining | Mood | What the pup does |
-|---|---|---|
-| ≥ 80% | Ecstatic | bounces, tongue out, tail going full tilt, floating hearts |
-| 60–80% | Happy | panting, wagging |
-| 40–60% | Content | sits tall, an ear swivels now and then, lazy tail thump |
-| 20–40% | Anxious | ears pinned back, worried brows, licks its nose, tail low, keeps glancing at the bowl |
-| 5–20% | Sad | lying with its head on its paws, puppy eyes, a tear |
-| < 5% | Exhausted | asleep with zzz and a "wakes in 1h 12m" countdown |
-| no data | Sniffing | cocks one ear, then the other, "?" |
+| Remaining | Mood      | What the pup does                                                                     |
+| --------- | --------- | ------------------------------------------------------------------------------------- |
+| ≥ 80%     | Ecstatic  | bounces, tongue out, tail going full tilt, floating hearts                            |
+| 60–80%    | Happy     | panting, wagging                                                                      |
+| 40–60%    | Content   | sits tall, an ear swivels now and then, lazy tail thump                               |
+| 20–40%    | Anxious   | ears pinned back, worried brows, licks its nose, tail low, keeps glancing at the bowl |
+| 5–20%     | Sad       | lying with its head on its paws, puppy eyes, a tear                                   |
+| < 5%      | Exhausted | asleep with zzz and a "wakes in 1h 12m" countdown                                     |
+| no data   | Sniffing  | cocks one ear, then the other, "?"                                                    |
 
 When a limit resets, the pup jumps for joy. Click it to pet it, drag it anywhere, and right-click for the menu.
 
 ## Data sources
 
-| Source | What it measures | Setup |
-|---|---|---|
-| **Claude plan limits** (Pro, Max, Team, Enterprise) | 5-hour and weekly usage %, with reset times | Settings › tick **Live updates** |
-| **Claude Code logs** | Tokens and estimated $ from `~/.claude/projects/**/*.jsonl` | Automatic; set a budget to let it drive the mood |
-| **Anthropic API credits** | Month-to-date spend via the Admin API | Settings › paste an Admin key (`sk-ant-admin…`), then set a monthly budget or your current balance |
+| Source                                              | What it measures                                            | Setup                                                                                              |
+| --------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Claude plan limits** (Pro, Max, Team, Enterprise) | 5-hour and weekly usage %, with reset times                 | Settings › tick **Live updates**                                                                   |
+| **Claude Code logs**                                | Tokens and estimated $ from `~/.claude/projects/**/*.jsonl` | Automatic; set a budget to let it drive the mood                                                   |
+| **Anthropic API credits**                           | Month-to-date spend via the Admin API                       | Settings › paste an Admin key (`sk-ant-admin…`), then set a monthly budget or your current balance |
 
 By default the mood follows **whichever source has the least left**. You can change that in Settings.
 
@@ -41,6 +41,8 @@ Token Pup merges three sources and always uses the newest reading:
 3. **Status line bridge** (Pro/Max in a terminal)
    - Claude Code passes `rate_limits` to its [status line](https://code.claude.com/docs/en/statusline) command. The bridge (`bridge/statusline.mjs`) saves those numbers and prints `🐶 5h 42% · 7d 18%`. If you already had a status line, it shows that one's output instead.
    - The VS Code panel doesn't run status lines, and the docs only list Pro and Max for `rate_limits`.
+   - The bridge runs as `node statusline.mjs`, so it needs Node.js on your PATH. Installing it checks for Node first.
+   - The first install backs up `~/.claude/settings.json` and remembers any status line you had. Removing the bridge, or uninstalling Token Pup, puts that status line back.
 
 Once a reset time passes, the widget treats that window as fresh.
 
@@ -48,14 +50,21 @@ The API has no endpoint for your prepaid balance. Enter the balance from Console
 
 ## Run it
 
+Needs Node.js 22.18 or later.
+
 ```powershell
 npm install
 npm run dev        # development, with hot reload
-npm test           # unit tests
-npm run typecheck
+npm run check      # everything CI runs: typecheck, lint, format check, tests
+npm test           # unit tests only
+npm run format     # apply Prettier
 npm run sprites    # re-render scripts/preview-out/moods.png and build/icon.png
 npm run dist       # dist\Token Pup Setup x.y.z.exe (installer) and a portable .exe
 ```
+
+CI (`.github/workflows/ci.yml`) runs `npm run check` and a build on Windows and Ubuntu.
+
+Linting uses [oxlint](https://oxc.rs) rather than ESLint: the project is on TypeScript 7, which has no JavaScript API, and `typescript-eslint` supports TypeScript up to 6.0. The pixel grids in `src/shared/sprites/parts.ts` are excluded from Prettier so each sprite row stays on its own line.
 
 > If Electron starts as plain Node (`electron --version` prints a Node version), your shell has `ELECTRON_RUN_AS_NODE=1` set. This is common in terminals launched from editor extensions. Unset it first: `Remove-Item Env:ELECTRON_RUN_AS_NODE`.
 

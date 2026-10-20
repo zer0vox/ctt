@@ -20,20 +20,20 @@ describe('pup size', () => {
     expect(new SettingsStore(dir).data.scale).toBe(3)
   })
 
-  it('moves a size saved for the old 32px dog one step down, once', () => {
+  it('moves a size saved for the old 32px dog one step down, once', async () => {
     writeConfig({ scale: 4 })
     const store = new SettingsStore(dir)
     expect(store.data.scale).toBe(3)
-    store.update({ notifications: false })
+    await store.update({ notifications: false })
     expect(readConfig()).toMatchObject({ scale: 3, sizeVersion: 2 })
     expect(new SettingsStore(dir).data.scale).toBe(3)
   })
 
-  it('keeps sizes saved by this version and clamps to the menu', () => {
+  it('keeps sizes saved by this version and clamps to the menu', async () => {
     writeConfig({ scale: 5, sizeVersion: 2 })
     const store = new SettingsStore(dir)
     expect(store.data.scale).toBe(5)
-    expect(store.update({ scale: 9 }).scale).toBe(5)
-    expect(store.update({ scale: 1 }).scale).toBe(2)
+    expect((await store.update({ scale: 9 })).scale).toBe(5)
+    expect((await store.update({ scale: 1 })).scale).toBe(2)
   })
 })

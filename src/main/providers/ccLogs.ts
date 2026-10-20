@@ -7,12 +7,14 @@ import { open, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fmtClock, fmtDuration, fmtPct, fmtTokens, fmtUsd } from '../../shared/format.ts'
 import type { BudgetPeriod, LogBudget, UsageSnapshot } from '../../shared/types.ts'
-import { estimateCostUsd } from './pricing.ts'
+import { estimateCostUsd, isPriced } from './pricing.ts'
 
 export interface UsageRecord {
   ts: number
   tokens: number
   costUsd: number
+  /** The model isn't in the price table, so costUsd is a top-tier estimate. */
+  unpriced?: boolean
 }
 
 const HOUR = 3_600_000
@@ -51,7 +53,9 @@ export function parseUsageLine(line: string): { key: string; record: UsageRecord
   const tokens = counts.input + counts.output + counts.cacheWrite5m + counts.cacheWrite1h + counts.cacheRead
   // Claude Code logs one line per content block of the same response, all with the same usage.
   const key = msg.id ? `${msg.id}:${o.requestId ?? ''}` : String(o.uuid ?? `${ts}:${tokens}`)
-  return { key, record: { ts, tokens, costUsd: estimateCostUsd(model, counts, u.speed === 'fast') } }
+  const record: UsageRecord = { ts, tokens, costUsd: estimateCostUsd(model, counts, u.speed === 'fast') }
+  if (!isPriced(model)) record.unpriced = true
+  return { key, record }
 }
 
 export interface Block {
@@ -82,7 +86,11 @@ export function activeBlock(sorted: UsageRecord[], now: number): Block | null {
 }
 
 /** Start and end of the budget period that contains `now` (local time). */
-export function periodRange(period: BudgetPeriod, sorted: UsageRecord[], now: number): { start: number; end: number } | null {
+export function periodRange(
+  period: BudgetPeriod,
+  sorted: UsageRecord[],
+  now: number
+): { start: number; end: number } | null {
   const d = new Date(now)
   switch (period) {
     case 'block': {
@@ -106,14 +114,25 @@ export function periodRange(period: BudgetPeriod, sorted: UsageRecord[], now: nu
   }
 }
 
-function sumSince(sorted: UsageRecord[], start: number): { tokens: number; usd: number } {
-  let tokens = 0
-  let usd = 0
+interface Totals {
+  tokens: number
+  usd: number
+  /** Tokens from models missing from the price table (priced at top-tier rates). */
+  unpriced: number
+}
+
+function sumSince(sorted: UsageRecord[], start: number): Totals {
+  const t: Totals = { tokens: 0, usd: 0, unpriced: 0 }
   for (let i = sorted.length - 1; i >= 0 && sorted[i].ts >= start; i--) {
-    tokens += sorted[i].tokens
-    usd += sorted[i].costUsd
+    t.tokens += sorted[i].tokens
+    t.usd += sorted[i].costUsd
+    if (sorted[i].unpriced) t.unpriced += sorted[i].tokens
   }
-  return { tokens, usd }
+  return t
+}
+
+function unpricedNote(t: Totals): string[] {
+  return t.unpriced ? [`${fmtTokens(t.unpriced)} tokens from unrecognised models, priced at top-tier rates`] : []
 }
 
 const PERIOD_LABEL: Record<BudgetPeriod, string> = {
@@ -149,12 +168,12 @@ export function logSnapshot(sorted: UsageRecord[], budget: LogBudget | null, now
       ...base,
       usedFraction: null,
       summary: `${fmtTokens(today.tokens)} tok today`,
-      details: [...details, 'Set a budget in Settings to let this drive the mood']
+      details: [...details, ...unpricedNote(today), 'Set a budget in Settings to let this drive the mood']
     }
   }
 
   const range = periodRange(budget.period, sorted, now)
-  const spent = range ? sumSince(sorted, range.start) : { tokens: 0, usd: 0 }
+  const spent = range ? sumSince(sorted, range.start) : { tokens: 0, usd: 0, unpriced: 0 }
   const value = budget.metric === 'usd' ? spent.usd : spent.tokens
   const used = Math.min(1, value / budget.amount)
   const fmt = (v: number): string => (budget.metric === 'usd' ? fmtUsd(v) : fmtTokens(v))
@@ -168,12 +187,21 @@ export function logSnapshot(sorted: UsageRecord[], budget: LogBudget | null, now
     details: [
       `Budget: ${line} (${fmtPct(used)})`,
       ...(range ? [`Resets ${fmtClock(range.end)} (in ${fmtDuration(range.end - now)})`] : []),
+      ...unpricedNote(spent),
       ...details
     ]
   }
 }
 
-/** Tails every session log incrementally and keeps the last ~40 days of usage records. */
+/** With a working watcher, a full rescan is only a safety net; without one, it's how changes are found. */
+const FULL_SCAN_MS = 5 * 60_000
+const POLL_MS = 30_000
+
+/**
+ * Tails every session log incrementally and keeps the last ~40 days of usage records.
+ * Watcher events read just the files that changed; a periodic full scan catches anything the
+ * watcher missed and forgets files that were deleted.
+ */
 export class LogUsageProvider {
   private files = new Map<string, { size: number; leftover: Buffer }>()
   private seen = new Map<string, number>()
@@ -182,8 +210,11 @@ export class LogUsageProvider {
   private watcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
   private debounce: NodeJS.Timeout | null = null
-  private scanning: Promise<void> | null = null
-  private rescan = false
+  /** Pending work, done one pass at a time by drain(). */
+  private wantFull = false
+  private dirty = new Set<string>()
+  private working: Promise<void> | null = null
+  private lastFullScan = 0
 
   constructor(
     private readonly root: string,
@@ -192,7 +223,9 @@ export class LogUsageProvider {
 
   start(): void {
     void this.scan()
-    this.timer = setInterval(() => void this.scan(), 30_000)
+    this.timer = setInterval(() => {
+      if (!this.watcher || Date.now() - this.lastFullScan >= FULL_SCAN_MS) void this.scan()
+    }, POLL_MS)
   }
 
   stop(): void {
@@ -216,22 +249,46 @@ export class LogUsageProvider {
     return this.records
   }
 
-  scan(): Promise<void> {
-    if (this.scanning) {
-      this.rescan = true
-      return this.scanning
-    }
-    this.scanning = this.doScan().finally(() => {
-      this.scanning = null
-      if (this.rescan) {
-        this.rescan = false
-        void this.scan()
-      }
-    })
-    return this.scanning
+  /** Exposed for tests: how many log files are being tracked. */
+  trackedFiles(): number {
+    return this.files.size
   }
 
-  private async doScan(): Promise<void> {
+  /** Full scan. Resolves once a pass that started after this call has finished. */
+  scan(): Promise<void> {
+    this.wantFull = true
+    return (this.working ?? Promise.resolve()).then(() => this.drain())
+  }
+
+  private drain(): Promise<void> {
+    if (!this.working) {
+      this.working = this.work().finally(() => {
+        this.working = null
+        if (this.wantFull || this.dirty.size) void this.drain()
+      })
+    }
+    return this.working
+  }
+
+  private async work(): Promise<void> {
+    while (this.wantFull || this.dirty.size) {
+      const before = this.records.length
+      if (this.wantFull) {
+        this.wantFull = false
+        this.dirty.clear() // a full scan covers them
+        await this.fullScan()
+      } else {
+        const files = [...this.dirty]
+        this.dirty.clear()
+        for (const file of files) await this.readChanged(file)
+      }
+      this.prune(Date.now())
+      if (this.records.length !== before) this.onChange()
+    }
+  }
+
+  private async fullScan(): Promise<void> {
+    this.lastFullScan = Date.now()
     let names: string[]
     try {
       names = (await readdir(this.root, { recursive: true })).filter((n) => n.endsWith('.jsonl'))
@@ -239,35 +296,35 @@ export class LogUsageProvider {
       return // No Claude Code logs yet.
     }
     if (!this.watcher) this.watchRoot()
+    const present = new Set(names.map((n) => join(this.root, n)))
+    for (const file of this.files.keys()) if (!present.has(file)) this.files.delete(file)
+    for (const file of present) await this.readChanged(file)
+  }
 
-    const now = Date.now()
-    const before = this.records.length
-    for (const name of names) {
-      const file = join(this.root, name)
-      let st
-      try {
-        st = await stat(file)
-      } catch {
-        continue
-      }
-      const known = this.files.get(file)
-      if (!known) {
-        // Old files can't contribute to any budget period; just remember where they end.
-        if (st.mtimeMs < now - KEEP_MS) {
-          this.files.set(file, { size: st.size, leftover: Buffer.alloc(0) })
-          continue
-        }
-        await this.readFrom(file, 0, st.size)
-      } else if (st.size > known.size) {
-        await this.readFrom(file, known.size, st.size)
-      } else if (st.size < known.size) {
-        // Rewritten: read it again; de-duplication drops what we already have.
-        known.leftover = Buffer.alloc(0)
-        await this.readFrom(file, 0, st.size)
-      }
+  /** Read whatever is new in one file; forget it if it's gone. */
+  private async readChanged(file: string): Promise<void> {
+    let st
+    try {
+      st = await stat(file)
+    } catch {
+      this.files.delete(file)
+      return
     }
-    this.prune(now)
-    if (this.records.length !== before) this.onChange()
+    const known = this.files.get(file)
+    if (!known) {
+      // Old files can't contribute to any budget period; just remember where they end.
+      if (st.mtimeMs < Date.now() - KEEP_MS) {
+        this.files.set(file, { size: st.size, leftover: Buffer.alloc(0) })
+        return
+      }
+      await this.readFrom(file, 0, st.size)
+    } else if (st.size > known.size) {
+      await this.readFrom(file, known.size, st.size)
+    } else if (st.size < known.size) {
+      // Rewritten: read it again; de-duplication drops what we already have.
+      known.leftover = Buffer.alloc(0)
+      await this.readFrom(file, 0, st.size)
+    }
   }
 
   private async readFrom(file: string, from: number, to: number): Promise<void> {
@@ -283,7 +340,9 @@ export class LogUsageProvider {
         const { bytesRead } = await fh.read(buf, 0, len, pos)
         if (!bytesRead) break
         pos += bytesRead
-        const data = entry.leftover.length ? Buffer.concat([entry.leftover, buf.subarray(0, bytesRead)]) : buf.subarray(0, bytesRead)
+        const data = entry.leftover.length
+          ? Buffer.concat([entry.leftover, buf.subarray(0, bytesRead)])
+          : buf.subarray(0, bytesRead)
         const lastNl = data.lastIndexOf(0x0a)
         if (lastNl < 0) {
           entry.leftover = Buffer.from(data)
@@ -323,17 +382,20 @@ export class LogUsageProvider {
     try {
       this.watcher = watch(this.root, { recursive: true }, (_event, name) => {
         if (name && !String(name).endsWith('.jsonl')) return
+        // Read just the file that changed; without a name, fall back to a full scan.
+        if (name) this.dirty.add(join(this.root, String(name)))
+        else this.wantFull = true
         if (this.debounce) clearTimeout(this.debounce)
-        this.debounce = setTimeout(() => void this.scan(), 1000)
+        this.debounce = setTimeout(() => void this.drain(), 500)
       })
       // An unhandled 'error' (e.g. EPERM when ~/.claude/projects is deleted) would crash the main
-      // process. Drop the watcher; the 30s scan re-arms it once the folder is back.
+      // process. Drop the watcher; the 30s scans take over and re-arm it once the folder is back.
       this.watcher.on('error', () => {
         this.watcher?.close()
         this.watcher = null
       })
     } catch {
-      // The 30s timer still picks up changes.
+      // The 30s scans still pick up changes.
     }
   }
 }

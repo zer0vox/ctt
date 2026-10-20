@@ -79,3 +79,30 @@ describe('pickPrimary', () => {
     expect(joyOf(snap('x', 0.25))).toBeCloseTo(0.75)
   })
 })
+
+describe('pickPrimary with stale readings', () => {
+  const now = Date.UTC(2026, 9, 20, 12)
+  const stale = (id: string, used: number, resetsAt?: number): UsageSnapshot => ({
+    ...snap(id, used),
+    stale: true,
+    resetsAt
+  })
+
+  it('skips a stale reading that may have reset since', () => {
+    const picked = pickPrimary([stale('plan-5h', 0.9), snap('logs', 0.3)], 'auto', now)
+    expect(picked?.id).toBe('logs')
+  })
+
+  it('keeps a stale reading whose reset is still ahead (usage only climbs until then)', () => {
+    const picked = pickPrimary([stale('plan-7d', 0.83, now + 86_400_000), snap('plan-5h', 0.1)], 'auto', now)
+    expect(picked?.id).toBe('plan-7d')
+  })
+
+  it('falls back to stale readings when nothing else has data', () => {
+    expect(pickPrimary([stale('plan-5h', 0.9)], 'auto', now)?.id).toBe('plan-5h')
+  })
+
+  it('always honours an explicit choice', () => {
+    expect(pickPrimary([stale('plan-5h', 0.9), snap('logs', 0.3)], 'plan-5h', now)?.id).toBe('plan-5h')
+  })
+})

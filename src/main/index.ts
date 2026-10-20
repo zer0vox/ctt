@@ -1,11 +1,26 @@
-import { app, BrowserWindow, ipcMain, Notification, type Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Notification,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  type Tray
+} from 'electron'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import bridgeSource from '../../bridge/statusline.mjs?raw'
 import { fmtDuration, fmtPct } from '../shared/format.ts'
 import type { PetState, SettingsPatch, SettingsView, UsageSnapshot } from '../shared/types.ts'
 import { Aggregator, type MoodChange } from './aggregator.ts'
-import { bridgeStatus, installBridge, STATE_FILE, uninstallBridge, type BridgePaths } from './installBridge.ts'
+import {
+  bridgeStatus,
+  installBridge,
+  nodeVersion,
+  STATE_FILE,
+  uninstallBridge,
+  type BridgePaths
+} from './installBridge.ts'
 import { ApiUsageProvider } from './providers/apiAdmin.ts'
 import { LogUsageProvider } from './providers/ccLogs.ts'
 import { OAuthUsageProvider } from './providers/oauthUsage.ts'
@@ -18,12 +33,19 @@ import { createPetWindow, createSettingsWindow, PetDrag, resizePet } from './win
 app.setPath('userData', join(app.getPath('appData'), 'token-pup'))
 app.setAppUserModelId('com.tokenpup.app')
 
-if (!app.requestSingleInstanceLock()) {
+const dataDir = app.getPath('userData')
+const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+const bridgePaths: BridgePaths = { claudeSettings: join(claudeDir, 'settings.json'), dataDir }
+
+if (process.argv.includes('--uninstall-bridge')) {
+  // Run by the Windows uninstaller (build/installer.nsh) so Claude Code's status line goes back
+  // to what it was before Token Pup. No windows, no single-instance lock.
+  void uninstallBridge(bridgePaths)
+    .catch((e) => console.error(e))
+    .finally(() => app.exit(0))
+} else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  const dataDir = app.getPath('userData')
-  const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-  const bridgePaths: BridgePaths = { claudeSettings: join(claudeDir, 'settings.json'), dataDir }
   const store = new SettingsStore(dataDir)
 
   let pet: BrowserWindow | null = null
@@ -148,9 +170,9 @@ if (!app.requestSingleInstanceLock()) {
     else pet.showInactive()
   }
 
-  const savePatch = (patch: SettingsPatch): SettingsView => {
+  const savePatch = async (patch: SettingsPatch): Promise<SettingsView> => {
     const before = store.data
-    const s = store.update(patch)
+    const s = await store.update(patch)
     if (s.scale !== before.scale && pet && !pet.isDestroyed()) resizePet(pet, s.scale)
     if (s.clickThrough !== before.clickThrough) applyClickThrough()
     if (s.startOnLogin !== before.startOnLogin) setStartOnLogin(s.startOnLogin)
@@ -163,12 +185,9 @@ if (!app.requestSingleInstanceLock()) {
 
   /** Save from a tray click: on failure nothing changes and the user is told why. */
   const saveFromMenu = (patch: SettingsPatch): void => {
-    try {
-      savePatch(patch)
-    } catch (e) {
-      reportError(e)
-    }
-    settingsWin?.webContents.send('settings-changed')
+    savePatch(patch)
+      .catch(reportError)
+      .finally(() => settingsWin?.webContents.send('settings-changed'))
   }
 
   const menuActions = {
@@ -183,49 +202,71 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   // ── IPC ──────────────────────────────────────────────────────────────────
-  ipcMain.handle('state:get', () => aggregator.state())
-  ipcMain.handle('settings:get', () => view())
-  ipcMain.handle('settings:save', (_e, patch: SettingsPatch) => savePatch(patch))
-  ipcMain.handle('apikey:set', (_e, key: string | null) => {
-    if (key !== null && !/^sk-ant-admin\d*-[\w-]+$/.test(key.trim())) {
+  // Only our own pages may talk to main, and each handler only answers the window that uses it.
+  const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
+  const ourPage = (url: string | undefined): boolean =>
+    !!url && (url.startsWith('file://') || (!!devUrl && url.startsWith(devUrl)))
+  type Sender = 'pet' | 'settings' | 'any'
+  const allowed = (e: IpcMainEvent | IpcMainInvokeEvent, from: Sender): boolean => {
+    if (!ourPage(e.senderFrame?.url)) return false
+    if (from === 'pet') return !!pet && !pet.isDestroyed() && e.sender === pet.webContents
+    if (from === 'settings') return !!settingsWin && !settingsWin.isDestroyed() && e.sender === settingsWin.webContents
+    return true
+  }
+  const handle = <A extends unknown[], R>(channel: string, from: Sender, fn: (...args: A) => R): void => {
+    ipcMain.handle(channel, (e, ...args) => {
+      if (!allowed(e, from)) throw new Error(`Blocked ${channel} from an unexpected sender`)
+      return fn(...(args as A))
+    })
+  }
+  const on = <A extends unknown[]>(channel: string, from: Sender, fn: (...args: A) => void): void => {
+    ipcMain.on(channel, (e, ...args) => {
+      if (allowed(e, from)) fn(...(args as A))
+    })
+  }
+
+  handle('state:get', 'any', () => aggregator.state())
+  handle('settings:get', 'any', () => view())
+  handle('settings:save', 'settings', (patch: SettingsPatch) => savePatch(patch))
+  handle('apikey:set', 'settings', async (key: string | null) => {
+    if (key !== null && !/^sk-ant-admin\d*-[\w-]+$/.test(String(key).trim())) {
       throw new Error('That does not look like an Admin API key (sk-ant-admin…). Regular API keys cannot read usage.')
     }
-    store.setApiKey(key)
+    await store.setApiKey(key)
     api.reset()
     return view()
   })
-  ipcMain.handle('bridge:install', () => {
-    installBridge(bridgePaths, bridgeSource)
+  handle('bridge:install', 'settings', async () => {
+    if (!(await nodeVersion())) {
+      throw new Error(
+        "Node.js isn't on your PATH, and the status line bridge runs with `node`. Install Node.js from nodejs.org, or use Live updates instead."
+      )
+    }
+    await installBridge(bridgePaths, bridgeSource)
     plan.stop()
     plan.start()
     return view()
   })
-  ipcMain.handle('bridge:uninstall', () => {
-    uninstallBridge(bridgePaths)
+  handle('bridge:uninstall', 'settings', async () => {
+    await uninstallBridge(bridgePaths)
     return view()
   })
-  ipcMain.on('preview:joy', (_e, joy: number | null) => {
+  on('preview:joy', 'settings', (joy: number | null) => {
     aggregator.setPreview(typeof joy === 'number' ? Math.min(1, Math.max(0, joy)) : null)
   })
-  ipcMain.on('pet:ignore-mouse', (_e, ignore: boolean) => {
+  on('pet:ignore-mouse', 'pet', (ignore: boolean) => {
     if (!pet || pet.isDestroyed() || drag.active()) return
     if (store.data.clickThrough) pet.setIgnoreMouseEvents(true, { forward: true })
     else pet.setIgnoreMouseEvents(!!ignore, { forward: true })
   })
-  ipcMain.on('pet:drag-start', (_e, offset: { x: number; y: number }) => {
+  on('pet:drag-start', 'pet', (offset: { x: number; y: number }) => {
     if (!pet || pet.isDestroyed() || store.data.clickThrough) return
     const o = { x: Math.round(Number(offset?.x)) || 0, y: Math.round(Number(offset?.y)) || 0 }
-    drag.start(pet, o, (position) => {
-      // The pup has moved either way; only remembering the spot can fail.
-      try {
-        store.update({ position })
-      } catch (e) {
-        reportError(e)
-      }
-    })
+    // The pup has moved either way; only remembering the spot can fail.
+    drag.start(pet, o, (position) => void store.update({ position }).catch(reportError))
   })
-  ipcMain.on('pet:drag-end', () => drag.stop())
-  ipcMain.on('pet:context-menu', () => {
+  on('pet:drag-end', 'pet', () => drag.stop())
+  on('pet:context-menu', 'pet', () => {
     if (pet && !pet.isDestroyed()) buildMenu(aggregator.state(), menuActions).popup({ window: pet })
   })
 
@@ -263,11 +304,7 @@ if (!app.requestSingleInstanceLock()) {
     if (store.data.startOnLogin) setStartOnLogin(true)
     // First run: save defaults and open settings so the user can connect a data source.
     if (store.firstRun) {
-      try {
-        store.update({})
-      } catch (e) {
-        reportError(e)
-      }
+      store.update({}).catch(reportError)
       openSettings()
     }
   })

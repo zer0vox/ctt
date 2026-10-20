@@ -13,7 +13,19 @@ export function petSize(scale: number): { width: number; height: number } {
 
 const preload = (): string => join(__dirname, '../preload/index.js')
 
+/**
+ * Our pages never open windows or navigate away; refuse both so a stray link or injected
+ * script can't load other content into a window that has the preload bridge.
+ */
+function lockDown(win: BrowserWindow): void {
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== win.webContents.getURL()) e.preventDefault()
+  })
+}
+
 function loadPage(win: BrowserWindow, page: 'index' | 'settings'): void {
+  lockDown(win)
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (!app.isPackaged && devUrl) void win.loadURL(`${devUrl}/${page}.html`)
   else void win.loadFile(join(__dirname, `../renderer/${page}.html`))

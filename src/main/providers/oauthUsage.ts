@@ -44,14 +44,20 @@ export function tokenFromCredentials(json: unknown): OAuthToken | null {
 
 function keychainCredentials(): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { timeout: 5000 }, (err, out) =>
-      resolve(err ? null : out)
+    execFile(
+      'security',
+      ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+      { timeout: 5000 },
+      (err, out) => resolve(err ? null : out)
     )
   })
 }
 
 /** Claude Code keeps its login in the macOS Keychain, or in <config dir>/.credentials.json elsewhere. */
-export async function readClaudeToken(claudeDir: string, platform: NodeJS.Platform = process.platform): Promise<OAuthToken | null> {
+export async function readClaudeToken(
+  claudeDir: string,
+  platform: NodeJS.Platform = process.platform
+): Promise<OAuthToken | null> {
   if (platform === 'darwin') {
     try {
       const token = tokenFromCredentials(JSON.parse((await keychainCredentials()) ?? 'null'))
@@ -78,6 +84,8 @@ export class OAuthUsageProvider {
   private running = false
   private inFlight: Promise<void> | null = null
   private lastAttempt = 0
+  /** Bumped by reset(); a refresh that started under an older generation discards its result. */
+  private generation = 0
 
   constructor(
     private readonly claudeDir: string,
@@ -98,8 +106,10 @@ export class OAuthUsageProvider {
     this.timer = null
   }
 
-  /** The setting was toggled: start over. */
+  /** The setting was toggled: start over, ignoring any check already in flight. */
   reset(): void {
+    this.generation++
+    this.inFlight = null
     this.data = null
     this.delay = POLL_MS
     this.lastAttempt = 0
@@ -123,10 +133,11 @@ export class OAuthUsageProvider {
 
   refresh(): Promise<void> {
     if (this.inFlight) return this.inFlight
-    this.inFlight = this.doRefresh().finally(() => {
-      this.inFlight = null
+    const run: Promise<void> = this.doRefresh(this.generation).finally(() => {
+      if (this.inFlight === run) this.inFlight = null
     })
-    return this.inFlight
+    this.inFlight = run
+    return run
   }
 
   private schedule(ms: number): void {
@@ -138,7 +149,7 @@ export class OAuthUsageProvider {
     this.status = { ...this.status, state, message }
   }
 
-  private async doRefresh(): Promise<void> {
+  private async doRefresh(generation: number): Promise<void> {
     if (this.timer) clearTimeout(this.timer)
     if (!this.enabled()) {
       this.data = null
@@ -151,6 +162,7 @@ export class OAuthUsageProvider {
     let next = POLL_MS
 
     const token = await this.readToken(this.claudeDir)
+    if (generation !== this.generation) return
     if (!token) {
       this.set('no-login', 'No Claude login found. Sign in to Claude Code with your Claude account (not an API key).')
       next = LOGIN_CHECK_MS
@@ -158,14 +170,16 @@ export class OAuthUsageProvider {
       this.set('expired', 'Your Claude login has expired. Open Claude Code and it will renew it.')
       next = LOGIN_CHECK_MS
     } else {
-      next = await this.fetchUsage(token.accessToken, now)
+      const wait = await this.fetchUsage(token.accessToken, now, generation)
+      if (wait === null) return // reset() ran meanwhile
+      next = wait
     }
     this.onChange()
     this.schedule(next)
   }
 
-  /** Returns how long to wait before the next attempt. */
-  private async fetchUsage(accessToken: string, now: number): Promise<number> {
+  /** Returns how long to wait before the next attempt, or null when reset() made this check obsolete. */
+  private async fetchUsage(accessToken: string, now: number, generation: number): Promise<number | null> {
     let res: Response
     try {
       res = await this.fetchImpl(ENDPOINT, {
@@ -177,8 +191,10 @@ export class OAuthUsageProvider {
         signal: AbortSignal.timeout(15_000)
       })
     } catch {
+      if (generation !== this.generation) return null
       return this.backoff('Could not reach api.anthropic.com.')
     }
+    if (generation !== this.generation) return null
 
     if (res.status === 401 || res.status === 403) {
       this.set('expired', 'Your Claude login was not accepted. Open Claude Code to renew it.')
@@ -200,6 +216,7 @@ export class OAuthUsageProvider {
     } catch {
       return this.backoff('Usage response was not JSON.')
     }
+    if (generation !== this.generation) return null
     const state = planStateFromUsage(body, now, 'live')
     if (!state) {
       this.set('unsupported', 'Anthropic returned no plan limits for this account.')

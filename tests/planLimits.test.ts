@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   newestPlanState,
+  parseBridgeState,
   parseUsageCache,
   planSnapshots,
   STALE_AFTER_MS,
@@ -30,7 +31,10 @@ describe('planSnapshots', () => {
   })
 
   it('treats a window whose reset time has passed as fresh', () => {
-    const [five] = planSnapshots(state({ five_hour: { used_percentage: 100, resets_at: Math.floor((now - 1000) / 1000) } }), now)
+    const [five] = planSnapshots(
+      state({ five_hour: { used_percentage: 100, resets_at: Math.floor((now - 1000) / 1000) } }),
+      now
+    )
     expect(five.usedFraction).toBe(0)
     expect(five.summary).toBe('fresh')
   })
@@ -66,7 +70,10 @@ describe("Claude Code's usage cache", () => {
     const s = parseUsageCache(config)!
     expect(s.source).toBe('cache')
     expect(s.five_hour).toEqual({ used_percentage: 0, resets_at: null })
-    expect(s.seven_day).toEqual({ used_percentage: 74, resets_at: Math.floor(Date.parse('2026-10-19T23:00:00.415Z') / 1000) })
+    expect(s.seven_day).toEqual({
+      used_percentage: 74,
+      resets_at: Math.floor(Date.parse('2026-10-19T23:00:00.415Z') / 1000)
+    })
     expect(JSON.stringify(s)).not.toContain('someone')
     expect(JSON.stringify(s)).not.toContain('uuid')
   })
@@ -82,7 +89,9 @@ describe("Claude Code's usage cache", () => {
   it('ignores configs without a usable cache', () => {
     expect(parseUsageCache({})).toBeNull()
     expect(parseUsageCache(null)).toBeNull()
-    expect(parseUsageCache({ cachedUsageUtilization: { fetchedAtMs: 1, utilization: { five_hour: { utilization: 'x' } } } })).toBeNull()
+    expect(
+      parseUsageCache({ cachedUsageUtilization: { fetchedAtMs: 1, utilization: { five_hour: { utilization: 'x' } } } })
+    ).toBeNull()
   })
 
   it('prefers whichever source saw the limits most recently', () => {
@@ -91,5 +100,27 @@ describe("Claude Code's usage cache", () => {
     expect(newestPlanState(bridge, cache)?.source).toBe('bridge')
     expect(newestPlanState(state({ rateLimitsSeenAt: now - 7_200_000, source: 'bridge' }), cache)?.source).toBe('cache')
     expect(newestPlanState(null, cache)?.source).toBe('cache')
+  })
+})
+
+describe('parseBridgeState', () => {
+  it('drops malformed windows and fields instead of trusting them', () => {
+    const s = parseBridgeState({
+      updatedAt: 5,
+      rateLimitsSeenAt: 'yesterday',
+      five_hour: { used_percentage: '42', resets_at: 1 },
+      seven_day: { used_percentage: 18, resets_at: 'soon' },
+      model: 7
+    })!
+    expect(s.rateLimitsSeenAt).toBeNull()
+    expect(s.five_hour).toBeNull()
+    expect(s.seven_day).toEqual({ used_percentage: 18, resets_at: null })
+    expect(s.model).toBeNull()
+  })
+
+  it('rejects files without an update time, and non-numbers like NaN', () => {
+    expect(parseBridgeState({ five_hour: { used_percentage: 1 } })).toBeNull()
+    expect(parseBridgeState(null)).toBeNull()
+    expect(parseBridgeState({ updatedAt: 1, five_hour: { used_percentage: Number.NaN } })!.five_hour).toBeNull()
   })
 })

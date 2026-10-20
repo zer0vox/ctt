@@ -38,11 +38,22 @@ const FAMILY: Array<[word: string, rate: Rate]> = [
   ['haiku', { input: 0.1, output: 0.5, cacheRead: 0.01 }]
 ]
 
+/**
+ * For a model we don't recognise (say, one released after this table): the priciest rates, so a
+ * USD budget errs towards "used more", never silently towards $0.
+ */
+const UNKNOWN: Rate = { input: 10, output: 50, cacheRead: 1 }
+
 export function rateFor(model: string): Rate | null {
   const id = model.toLowerCase().replace(/\[.*\]$/, '')
   for (const [prefix, rate] of RATES) if (id.startsWith(prefix)) return rate
   for (const [word, rate] of FAMILY) if (id.includes(word)) return rate
   return null
+}
+
+/** False when `model` isn't in the price table, so its cost is a top-tier estimate. */
+export function isPriced(model: string): boolean {
+  return rateFor(model) !== null
 }
 
 export interface TokenCounts {
@@ -54,8 +65,7 @@ export interface TokenCounts {
 }
 
 export function estimateCostUsd(model: string, t: TokenCounts, fast = false): number {
-  const rate = rateFor(model)
-  if (!rate) return 0
+  const rate = rateFor(model) ?? UNKNOWN
   const usd =
     (t.input * rate.input +
       t.output * rate.output +
